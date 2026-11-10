@@ -5,7 +5,7 @@
 # static files). Nothing is downloaded but that image. The base is pinned by
 # its tag, which is also `version` in config.yaml, and by the digest of its
 # multi-architecture index: Docker picks linux/amd64 or linux/arm64 from it.
-FROM ghcr.io/housecairn/housecairn:sha-623e794@sha256:673defbae2e6123cbf3bc817c0ed3f5240b59d45b9571480c34ed2b73f5865df
+FROM ghcr.io/housecairn/housecairn:sha-79ca410@sha256:7dde587e2e96aa4c2a94d8a1797a65d39539529f7cac9983206719f122e9939a
 
 # The start script runs as root, only to read /data/options.json (written by
 # the Supervisor, mode 600) and to give /data to 10001:10001; it then drops

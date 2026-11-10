@@ -3,8 +3,9 @@ configuration:
     name: Noms d'hôte
     description: >-
       Noms et adresses que vous tapez dans le navigateur pour joindre Home
-      Assistant, comme homeassistant.local ou 192.0.2.10. Housecairn refuse
-      tout autre nom. Une adresse IPv6 s'écrit entre crochets.
+      Assistant, comme homeassistant.local ou 192.0.2.10, accès à distance
+      compris. Housecairn refuse tout autre nom. Une adresse IPv6 s'écrit
+      entre crochets.
   default_language:
     name: Langue par défaut
     description: >-
@@ -43,4 +44,7 @@ configuration:
       Avec l'authentification unique : seule cette adresse, vérifiée par le
       fournisseur, peut devenir le premier administrateur.
 network:
-  8000/tcp: Interface web de Housecairn (HTTP sans chiffrement)
+  8000/tcp: >-
+    Interface web de Housecairn, en HTTP sans chiffrement. Inutile avec
+    l'ingress ; nécessaire aux flux de calendrier, aux étiquettes QR et aux
+    liens des e-mails.

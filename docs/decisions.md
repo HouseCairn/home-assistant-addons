@@ -101,14 +101,15 @@ users would not all run the same image. The base image is also pinned by
 digest in the Dockerfile; tag, digest, `version` and the changelog change in
 the same commit.
 
-## D5. The web interface on its own port, in plain HTTP, until ingress
+## D5. Plain HTTP, through ingress and on the optional port
 
-This first version opens HouseCairn on port 8000 of the host
-(`webui: http://[HOST]:[PORT:8000]`), without ingress, which needs a change of
-HouseCairn first (serving under a path prefix).
+The first version opened HouseCairn on port 8000 of the host, without ingress.
+Since D9, ingress is the way in, and the port is optional and off by default.
+Both may be plain HTTP: the port always, and ingress when Home Assistant itself
+is reached without TLS.
 
 HouseCairn's defaults enforce HTTPS: redirection, HSTS, cookies sent over
-HTTPS only. On a port without TLS they would make the instance unusable, so
+HTTPS only. Without TLS they would make the instance unusable, so
 `config.yaml` sets `SECURE_SSL_REDIRECT=false`, `SECURE_HSTS_SECONDS=0`,
 `SESSION_COOKIE_SECURE=false` and `CSRF_COOKIE_SECURE=false`, and nothing else.
 What follows, written in `DOCS.md`:
@@ -117,6 +118,9 @@ What follows, written in `DOCS.md`:
   network you trust, not from the Internet;
 - passkeys and the anti-robot check of open sign-up need a secure context
   (HTTPS, or `localhost`), so they do not work this way.
+
+Cookies stay without the `Secure` flag even through ingress over HTTPS: the
+same instance may be reached through Home Assistant in plain HTTP.
 
 ## D6. Least privilege
 
@@ -129,10 +133,12 @@ AppArmor: the Supervisor applies Docker's default profile. The documentation
 recommends a profile of the app's own, but asks to write it by running the app
 with the profile in complain mode and reading the audit log. That needs a real
 installation, so no `apparmor.txt` is shipped yet: an untested profile would
-either block HouseCairn or protect nothing.
+either block HouseCairn or protect nothing. It is left to a later version,
+written from the audit log of a real installation.
 
-Security rating, as the Supervisor computes it: 5 (the starting value; no
-bonus, since a port is mapped to the host and there is no ingress yet).
+Security rating, as the Supervisor computes it (`rating_security` in
+`supervisor/apps/utils.py`): 7, the starting 5 and 2 for ingress. It was 5
+without ingress. A profile of the app's own would add 1.
 
 ## D7. Backups
 
@@ -153,3 +159,97 @@ The Supervisor reads the image's `HEALTHCHECK`; `watchdog` is refused by the
 app linter. HouseCairn's probe sends a host name of `ALLOWED_HOSTS`, which the
 app sets from its options, not as a variable of the container: the Dockerfile
 runs the same probe through the start script.
+
+## D9. Ingress, with the prefix of each request, trusted from the Supervisor
+
+The browser reaches the app at `/api/hassio_ingress/<token>/` on Home
+Assistant. Home Assistant Core checks the user's session, adds
+`X-Ingress-Path: /api/hassio_ingress/<token>`, `X-Forwarded-Host` and
+`X-Forwarded-Proto` (`homeassistant/components/hassio/ingress.py`), and passes
+the request to the Supervisor, which checks the ingress session cookie and
+forwards it, path without the prefix, to the app on its internal network
+(`supervisor/api/ingress.py`). Both keep the other request headers, `Host`
+included. The Supervisor's address on that network is `172.30.32.2`: "Your
+web server only ever sees requests from the Supervisor, at `172.30.32.2`"
+(developer documentation, Ingress), and `DOCKER_IPV4_NETWORK_MASK[2]` of
+`172.30.32.0/23` in `supervisor/const.py`. The token is generated when the app
+is installed and kept with the app's settings (`SCHEMA_APP_USER` in
+`supervisor/apps/validate.py`): it stays across restarts and updates, and
+changes with a new installation.
+
+`config.yaml`: `ingress: true`, `ingress_port: 8000` (HouseCairn's own web
+server, no second server), `panel_icon`, `panel_title`, and
+`panel_admin: false`: HouseCairn is for the whole household and has its own
+accounts, so a Home Assistant user who is not an administrator may reach its
+sign-in page. No `webui`: the app linter refuses it with ingress.
+
+`run.py` sets, after the options, so that nothing overrides them:
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `HOUSECAIRN_URL_PREFIX_HEADER` | `X-Ingress-Path` | The token is only known per request: HouseCairn's header mode (its ADR 0055). |
+| `HOUSECAIRN_FORWARDED_ALLOW_IPS` | `172.30.32.2` | Only the Supervisor may set the prefix and the forwarding headers, in gunicorn and in Django; from any other peer HouseCairn removes them. Not `*`, not a network, not the loopback. |
+| `HOUSECAIRN_BEHIND_TLS_PROXY` | `true` | Through Home Assistant over HTTPS, the browser sends `Origin: https://...`; HouseCairn must read `X-Forwarded-Proto` from the Supervisor to accept that origin (CSRF check). |
+
+`HOUSECAIRN_URL_PREFIX` is removed from the environment. With it set,
+HouseCairn's cookies would get its path, which ingress addresses do not share,
+and the sign-in through ingress would fail.
+
+How ingress and the port share one server:
+
+- **The prefix.** A request on the port comes from the host's network, not from
+  the Supervisor: it never gets the ingress prefix, even if it sends the
+  header, and is served at the root.
+- **`ALLOWED_HOSTS`.** HouseCairn checks the `Host` header, which Home
+  Assistant passes on unchanged (`X-Forwarded-Host` is not read): the option
+  lists every name used to reach Home Assistant, remote access included, and
+  the address used for the port.
+- **`CSRF_TRUSTED_ORIGINS`.** Not needed. The origin of a form is the browser's
+  scheme and `Host`; HouseCairn compares it with its own, whose scheme comes
+  from the Supervisor's `X-Forwarded-Proto` through ingress, and is HTTP on the
+  port, where that header is ignored.
+- **Cookies.** Through ingress, HouseCairn limits its cookies to the ingress
+  path; on the port, they are at `/`. Browsers do not tell ports apart, so a
+  cookie of the port is also sent to ingress addresses, after the ingress one,
+  and Django keeps the last value of a name. `DOCS.md` asks to open the port
+  under another name or address than Home Assistant.
+
+Consequences, in `DOCS.md`:
+
+- **Links meant for outside Home Assistant.** A link built during an ingress
+  request holds the ingress address (calendar feeds, QR labels, invitations),
+  and the Supervisor only serves it to a browser with an ingress session,
+  which Home Assistant's interface opens. Links built in the background
+  (reminders) have no request: they use `HOUSECAIRN_URL_PREFIX`, empty here,
+  so they lead to the root of HouseCairn's public address, which only the port
+  serves. Those links need the port, and the public address set to it.
+- **Sign-in rate limits.** The Supervisor appends the address of its own peer,
+  Home Assistant Core, to `X-Forwarded-For`; HouseCairn takes the right-most
+  address that is not a trusted proxy, so every ingress request counts as Home
+  Assistant's. Trusting Core's address as well would let requests on the port
+  claim another client address, if they reach the app from the network's
+  gateway: not done.
+- **HouseCairn's own sign-in.** The documentation suggests no second sign-in
+  behind ingress, and the Supervisor adds `X-Remote-User-Id` and related
+  headers for that. HouseCairn does not read them: its accounts, roles and
+  homes are its own, and its sign-in stays.
+- **Single sign-on** through ingress would need the ingress token in the
+  provider's redirect address: it goes through the port.
+
+Rejected:
+
+- **A fixed prefix read from the Supervisor's API** (`ingress_entry` of
+  `GET /addons/self/info`) at start-up, as HouseCairn's ADR 0055 suggests. It
+  needs `hassio_api` and a Supervisor token in the container, for links of
+  reminders that would hold the ingress address, which still only opens with
+  an ingress session.
+- **Keeping the port on by default.** The documentation asks ingress apps to
+  deny everything but the Supervisor, and the port is plain HTTP: it is opt-in,
+  for the links that need it.
+- **A second web server** listening for the Supervisor only: HouseCairn already
+  refuses the forwarding headers from anyone else.
+
+Prerequisite: HouseCairn sends `X-Frame-Options: DENY` and
+`frame-ancestors 'none'`, and Home Assistant shows ingress in a frame of its
+own origin (`src/panels/app/ha-panel-app.ts` of its frontend). Ingress needs
+HouseCairn to allow being framed by its own origin.

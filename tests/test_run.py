@@ -24,6 +24,11 @@ run = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run)
 
 HOSTS = {"allowed_hosts": ["homeassistant.local"]}
+INGRESS = {
+    "HOUSECAIRN_URL_PREFIX_HEADER": "X-Ingress-Path",
+    "HOUSECAIRN_FORWARDED_ALLOW_IPS": "172.30.32.2",
+    "HOUSECAIRN_BEHIND_TLS_PROXY": "true",
+}
 
 
 def env_of(options: dict, base: dict | None = None) -> dict[str, str]:
@@ -31,10 +36,11 @@ def env_of(options: dict, base: dict | None = None) -> dict[str, str]:
 
 
 class EnvironmentTests(unittest.TestCase):
-    def test_minimal_options_set_only_the_hosts(self) -> None:
+    def test_minimal_options_set_only_the_hosts_and_ingress(self) -> None:
         env = env_of(HOSTS, {"PATH": "/usr/bin"})
         self.assertEqual(
-            env, {"PATH": "/usr/bin", "HOME": "/nonexistent", "ALLOWED_HOSTS": "homeassistant.local"}
+            env,
+            {"PATH": "/usr/bin", "HOME": "/nonexistent", "ALLOWED_HOSTS": "homeassistant.local", **INGRESS},
         )
 
     def test_hosts_are_joined_and_stripped(self) -> None:
@@ -100,6 +106,37 @@ class EnvironmentTests(unittest.TestCase):
         ):
             with self.subTest(options=options), self.assertRaises(run.OptionError):
                 env_of({**HOSTS, **options})
+
+
+class IngressTests(unittest.TestCase):
+    """The prefix header of Ingress, trusted from the Supervisor and nobody else."""
+
+    def test_prefix_comes_from_the_ingress_header(self) -> None:
+        env = env_of(HOSTS)
+        self.assertEqual(env["HOUSECAIRN_URL_PREFIX_HEADER"], "X-Ingress-Path")
+        self.assertNotIn("HOUSECAIRN_URL_PREFIX", env)
+
+    def test_only_the_supervisor_is_a_trusted_proxy(self) -> None:
+        # Exactly one address, the Supervisor's: no network, no "*", not the
+        # loopback (HouseCairn's default), not the gateway of the network.
+        self.assertEqual(env_of(HOSTS)["HOUSECAIRN_FORWARDED_ALLOW_IPS"], "172.30.32.2")
+        self.assertEqual(run.SUPERVISOR_ADDRESS, "172.30.32.2")
+
+    def test_the_container_cannot_widen_the_trust(self) -> None:
+        base = {
+            "HOUSECAIRN_FORWARDED_ALLOW_IPS": "*",
+            "HOUSECAIRN_URL_PREFIX_HEADER": "X-Forwarded-Prefix",
+            "HOUSECAIRN_BEHIND_TLS_PROXY": "false",
+            "HOUSECAIRN_URL_PREFIX": "/housecairn",
+        }
+        env = env_of(HOSTS, base)
+        self.assertEqual({key: env[key] for key in INGRESS}, INGRESS)
+        # A fixed prefix would limit the cookies to a path Ingress does not use.
+        self.assertNotIn("HOUSECAIRN_URL_PREFIX", env)
+
+    def test_options_cannot_reach_the_ingress_variables(self) -> None:
+        options = {**HOSTS, **{key.lower(): "x" for key in INGRESS}, "HOUSECAIRN_FORWARDED_ALLOW_IPS": "*"}
+        self.assertEqual({key: env_of(options)[key] for key in INGRESS}, INGRESS)
 
 
 class LoadOptionsTests(unittest.TestCase):
@@ -212,6 +249,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(child_env["HOUSECAIRN_DEFAULT_LANGUAGE"], "fr")
             self.assertEqual(child_env["TIME_ZONE"], "Europe/Paris")
             self.assertNotIn("SUPERVISOR_TOKEN", child_env)
+            self.assertEqual({key: child_env[key] for key in INGRESS}, INGRESS)
             self.assertEqual(os.stat(data).st_uid, run.APP_UID)
             self.assertEqual(os.stat(data / "db.sqlite3").st_uid, run.APP_UID)
             self.assertEqual(os.stat(data / "options.json").st_uid, 0)

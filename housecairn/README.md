@@ -8,7 +8,7 @@ of a smoke detector, the filter of the ventilation) and one-off projects
 Self-hosted, with no telemetry and no outgoing call you have not configured.
 Its data stays in the app's folder, in your Home Assistant backups.
 
-**Experimental**: this version opens Housecairn on its own port, in plain HTTP,
-on your local network. Read the **Documentation** tab before you start it.
+**Experimental**: Housecairn opens inside Home Assistant, through ingress, with
+its own sign-in. Read the **Documentation** tab before you start it.
 
 Documentation of Housecairn: <https://docs.housecairn.app>.

@@ -4,7 +4,7 @@
 name: Housecairn
 # The HouseCairn image this app is built from (Dockerfile): a tag published
 # on ghcr.io/housecairn/housecairn. Change both together (D4).
-version: "sha-623e794"
+version: "sha-79ca410"
 slug: housecairn
 description: >-
   Plan home maintenance and renovation work: what to do in the house, where,
@@ -20,11 +20,21 @@ stage: experimental
 # (D2). HouseCairn's image cannot be used as is: it runs as user 10001 and the
 # Supervisor creates /data and options.json as root.
 #
-# The web interface, on its own port until ingress comes (D5). Plain HTTP:
-# see DOCS.md.
+# The web interface, through Ingress (D9): in the Home Assistant interface,
+# behind its sign-in, from the Supervisor only. HouseCairn's web server listens
+# on 8000 in the container.
+ingress: true
+ingress_port: 8000
+# Users who are not Home Assistant administrators see it too: Housecairn is
+# for the whole household, and asks for its own sign-in.
+panel_admin: false
+panel_icon: mdi:home-roof
+panel_title: Housecairn
+# The same server on a port of the host, in plain HTTP (D5): off unless the
+# user gives it a port number on the Configuration tab (Network). No `webui`:
+# with Ingress, Open Web UI opens it in Home Assistant.
 ports:
-  8000/tcp: 8000
-webui: http://[HOST]:[PORT:8000]
+  8000/tcp: null
 # Health: the HEALTHCHECK of the Dockerfile (the linter refuses `watchdog`).
 #
 # Least privilege (D6): no `map` (only the app's private /data, always
@@ -37,9 +47,10 @@ timeout: 30
 # Stopped during a backup, so the SQLite database and its WAL file are copied
 # in a consistent state (D7).
 backup: cold
-# Variables that do not depend on the user. The app is reached in plain HTTP
-# on its port: no redirection to HTTPS, no HSTS, and cookies that are not
-# limited to HTTPS (D5). Everything else keeps HouseCairn's safe defaults.
+# Variables that do not depend on the user. Ingress may be reached in plain
+# HTTP, as Home Assistant itself, and so may the port: no redirection to HTTPS,
+# no HSTS, and cookies that are not limited to HTTPS (D5). Those of Ingress are
+# set by run.py (D9). Everything else keeps HouseCairn's safe defaults.
 environment:
   SECURE_SSL_REDIRECT: "false"
   SECURE_HSTS_SECONDS: "0"
