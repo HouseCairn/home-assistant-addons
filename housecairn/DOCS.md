@@ -58,7 +58,10 @@ administrator comes from one of these:
   `http://homeassistant.local:8000/accounts/oidc/oidc/login/callback/`. Many
   providers only accept `https://` redirect addresses outside `localhost`:
   check yours.
-- **A local account, from the command line.** This needs a shell with access
+- **A screen in Housecairn (coming).** Creating the first administrator from a
+  web page of the application, without single sign-on or a shell, is planned
+  and not available yet. Until then, use single sign-on or the command line.
+- **A local account, from the command line**, in the meantime. This needs a shell with access
   to Docker on the host (for example the community SSH app with protection
   mode off). Find the name of the container with `docker ps` (it ends with
   `housecairn`), then:
