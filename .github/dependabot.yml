@@ -1,0 +1,23 @@
+# Dependency updates, as in the main repository: weekly, minor and patch
+# updates grouped, and a 7-day cooldown, so that a compromised release has
+# time to be noticed and withdrawn. Security updates are not delayed.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: chore(deps)
+    open-pull-requests-limit: 5
+
+# The base image of the app (housecairn/Dockerfile) is HouseCairn's own image:
+# it follows the main repository by hand, together with `version` in
+# config.yaml and the changelog, so it has no Dependabot entry.
