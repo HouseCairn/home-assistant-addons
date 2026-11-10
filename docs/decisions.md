@@ -190,6 +190,7 @@ sign-in page. No `webui`: the app linter refuses it with ingress.
 | `HOUSECAIRN_URL_PREFIX_HEADER` | `X-Ingress-Path` | The token is only known per request: HouseCairn's header mode (its ADR 0055). |
 | `HOUSECAIRN_FORWARDED_ALLOW_IPS` | `172.30.32.2` | Only the Supervisor may set the prefix and the forwarding headers, in gunicorn and in Django; from any other peer HouseCairn removes them. Not `*`, not a network, not the loopback. |
 | `HOUSECAIRN_BEHIND_TLS_PROXY` | `true` | Through Home Assistant over HTTPS, the browser sends `Origin: https://...`; HouseCairn must read `X-Forwarded-Proto` from the Supervisor to accept that origin (CSRF check). |
+| `HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING` | `true` | Home Assistant shows ingress in a frame of its own origin (`src/panels/app/ha-panel-app.ts` of its frontend). HouseCairn refuses every frame by default (`X-Frame-Options: DENY`, `frame-ancestors 'none'`); this gives `SAMEORIGIN` and `frame-ancestors 'self'`, so a page of another origin still cannot frame it. |
 
 `HOUSECAIRN_URL_PREFIX` is removed from the environment. With it set,
 HouseCairn's cookies would get its path, which ingress addresses do not share,
@@ -249,7 +250,9 @@ Rejected:
 - **A second web server** listening for the Supervisor only: HouseCairn already
   refuses the forwarding headers from anyone else.
 
-Prerequisite: HouseCairn sends `X-Frame-Options: DENY` and
-`frame-ancestors 'none'`, and Home Assistant shows ingress in a frame of its
-own origin (`src/panels/app/ha-panel-app.ts` of its frontend). Ingress needs
-HouseCairn to allow being framed by its own origin.
+Frames: HouseCairn refuses to be shown in any frame unless
+`HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING` is `true` (from `sha-4be6010`). The app
+sets it, and the frame of Home Assistant's ingress panel is of the same
+origin as the page around it, so it is allowed and a page of another site is
+not. On the port, the same headers apply: only a page of the port's own origin
+may frame it.

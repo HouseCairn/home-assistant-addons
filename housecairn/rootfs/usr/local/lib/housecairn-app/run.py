@@ -8,7 +8,7 @@ the two, then gets out of the way:
 
 1. read /data/options.json and turn the options into HouseCairn's variables,
    then add those of Ingress (the path prefix from X-Ingress-Path, trusted
-   from the Supervisor only);
+   from the Supervisor only, and frames of the same origin allowed);
 2. give /data and what is in it to 10001:10001 (the Supervisor creates the
    folder, and restores backups, as root), except options.json;
 3. drop root for good (groups, group, user) and replace itself with
@@ -57,12 +57,15 @@ SUPERVISOR_ADDRESS = "172.30.32.2"
 # reads it there, but only from the Supervisor, whose X-Forwarded-Proto also
 # tells it whether the browser reached Home Assistant over HTTPS. From any other
 # peer, such as a browser on the app's own port, HouseCairn removes these
-# headers. Set last: neither an option nor a variable of the container changes
-# them.
+# headers. Home Assistant shows the app in a frame of its own page, on the same
+# origin: HouseCairn, which refuses every frame by default, then allows that
+# origin and no other to frame it. Set last: neither an option nor a variable
+# of the container changes them.
 INGRESS_VARIABLES = {
     "HOUSECAIRN_URL_PREFIX_HEADER": "X-Ingress-Path",
     "HOUSECAIRN_FORWARDED_ALLOW_IPS": SUPERVISOR_ADDRESS,
     "HOUSECAIRN_BEHIND_TLS_PROXY": "true",
+    "HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING": "true",
 }
 
 LANGUAGES = ("en", "fr")

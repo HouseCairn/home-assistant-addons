@@ -28,6 +28,7 @@ INGRESS = {
     "HOUSECAIRN_URL_PREFIX_HEADER": "X-Ingress-Path",
     "HOUSECAIRN_FORWARDED_ALLOW_IPS": "172.30.32.2",
     "HOUSECAIRN_BEHIND_TLS_PROXY": "true",
+    "HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING": "true",
 }
 
 
@@ -122,11 +123,17 @@ class IngressTests(unittest.TestCase):
         self.assertEqual(env_of(HOSTS)["HOUSECAIRN_FORWARDED_ALLOW_IPS"], "172.30.32.2")
         self.assertEqual(run.SUPERVISOR_ADDRESS, "172.30.32.2")
 
+    def test_frames_of_the_same_origin_are_allowed(self) -> None:
+        # Home Assistant shows Ingress in a frame of its own origin; HouseCairn
+        # refuses every frame unless this is set.
+        self.assertEqual(env_of(HOSTS)["HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING"], "true")
+
     def test_the_container_cannot_widen_the_trust(self) -> None:
         base = {
             "HOUSECAIRN_FORWARDED_ALLOW_IPS": "*",
             "HOUSECAIRN_URL_PREFIX_HEADER": "X-Forwarded-Prefix",
             "HOUSECAIRN_BEHIND_TLS_PROXY": "false",
+            "HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING": "false",
             "HOUSECAIRN_URL_PREFIX": "/housecairn",
         }
         env = env_of(HOSTS, base)
