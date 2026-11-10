@@ -20,6 +20,14 @@ configuration:
     description: >-
       Anyone may create an account from the sign-up page. Needs outgoing email
       and HTTPS: leave it off in this version.
+  site_url:
+    name: Public address
+    description: >-
+      Address that reaches Housecairn without Home Assistant, such as its port,
+      http://192.0.2.10:8000, without a path. Links of invitations, calendar
+      feeds, QR labels and emails are built on it. Empty: editable in
+      Housecairn, and those links, when made through Home Assistant, do not
+      work outside it.
   oidc_server_url:
     name: Single sign-on issuer
     description: >-

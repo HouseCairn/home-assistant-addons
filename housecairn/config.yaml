@@ -69,6 +69,7 @@ schema:
   default_language: list(en|fr)?
   time_zone: "match(^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$)?"
   signup_open: bool?
+  site_url: url?
   oidc_server_url: url?
   oidc_client_id: str?
   oidc_client_secret: password?

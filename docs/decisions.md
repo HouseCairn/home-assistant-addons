@@ -78,6 +78,7 @@ needed.
 | `default_language` | `HOUSECAIRN_DEFAULT_LANGUAGE` | `en`, editable in the interface |
 | `time_zone` | `TIME_ZONE` | the time zone of Home Assistant (`TZ`, set by the Supervisor) |
 | `signup_open` | `HOUSECAIRN_SIGNUP_OPEN` | closed, editable in the interface |
+| `site_url` | `HOUSECAIRN_SITE_URL` | the address of each request, editable in the interface; through ingress, links meant for outside do not work (D9) |
 | `oidc_server_url`, `oidc_client_id`, `oidc_client_secret`, `oidc_provider_name` | `OIDC_SERVER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_PROVIDER_NAME` | no provider from the options; providers can be declared in the interface |
 | `bootstrap_admin_email` | `HOUSECAIRN_BOOTSTRAP_ADMIN_EMAIL` | the first account through single sign-on becomes administrator |
 

@@ -21,6 +21,14 @@ configuration:
     description: >-
       Chacun peut créer un compte depuis la page d'inscription. Demande l'envoi
       d'e-mails et HTTPS : laissez-la fermée dans cette version.
+  site_url:
+    name: Adresse publique
+    description: >-
+      Adresse qui joint Housecairn sans passer par Home Assistant, comme son
+      port, http://192.0.2.10:8000, sans chemin. Les liens des invitations, des
+      flux de calendrier, des étiquettes QR et des e-mails sont construits
+      dessus. Vide : modifiable dans Housecairn, et ces liens, faits depuis
+      Home Assistant, ne fonctionnent pas en dehors.
   oidc_server_url:
     name: Émetteur de l'authentification unique
     description: >-

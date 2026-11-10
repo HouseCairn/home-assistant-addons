@@ -83,6 +83,32 @@ class EnvironmentTests(unittest.TestCase):
         with self.assertRaises(run.OptionError):
             env_of({**HOSTS, "signup_open": "yes"})
 
+    def test_public_address(self) -> None:
+        for given, expected in (
+            ("http://192.0.2.10:8000", "http://192.0.2.10:8000"),
+            (" https://home.example.com/ ", "https://home.example.com"),
+            ("http://[2001:db8::1]:8000", "http://[2001:db8::1]:8000"),
+        ):
+            with self.subTest(given=given):
+                self.assertEqual(env_of({**HOSTS, "site_url": given})["HOUSECAIRN_SITE_URL"], expected)
+        self.assertNotIn("HOUSECAIRN_SITE_URL", env_of(HOSTS))
+        self.assertNotIn("HOUSECAIRN_SITE_URL", env_of({**HOSTS, "site_url": ""}))
+        for bad in (
+            "home.example.com",
+            "ftp://home.example.com",
+            "https://home.example.com/housecairn",
+            "https://home.example.com/?a=1",
+            "https://home.example.com/#top",
+            "https://user:pass@home.example.com",
+            "https://home.example.com:99999",
+            "http://[not-an-address]",
+            "https://",
+            "https://home.example.com\nDEBUG=true",
+            3,
+        ):
+            with self.subTest(bad=bad), self.assertRaises(run.OptionError):
+                env_of({**HOSTS, "site_url": bad})
+
     def test_oidc_all_or_nothing(self) -> None:
         env = env_of(
             {

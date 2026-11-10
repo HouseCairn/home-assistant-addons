@@ -33,6 +33,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 DATA_DIR = Path("/data")
 OPTIONS_FILE = DATA_DIR / "options.json"
@@ -173,12 +174,48 @@ def environment_from_options(
 
     env.update(_oidc(options))
 
+    site_url = _site_url(options)
+    if site_url:
+        env["HOUSECAIRN_SITE_URL"] = site_url
+
     admin_email = _text(options, "bootstrap_admin_email")
     if admin_email:
         env["HOUSECAIRN_BOOTSTRAP_ADMIN_EMAIL"] = admin_email
 
     env.update(INGRESS_VARIABLES)
     return env
+
+
+def _site_url(options: Mapping[str, Any]) -> str:
+    """The public address, scheme and host only, as HouseCairn accepts it; empty when unset.
+
+    HouseCairn builds every link meant to leave it (invitations, emails, QR
+    labels, calendar feeds) on this address, never on the ingress path, which
+    only opens inside Home Assistant (D9). It has no path: the app serves
+    HouseCairn at the root of the port, and drops HOUSECAIRN_URL_PREFIX.
+    """
+    value = _text(options, "site_url")
+    if not value:
+        return ""
+    try:
+        parts = urlsplit(value)
+        valid = (
+            parts.scheme in ("http", "https")
+            and bool(parts.hostname)
+            and not parts.path.strip("/")
+            and not (parts.query or parts.fragment)
+            and parts.username is None
+            and parts.password is None
+            and (parts.port is None or parts.port > 0)
+        )
+    except ValueError:  # brackets that do not hold an address, a port out of range
+        valid = False
+    if not valid:
+        raise OptionError(
+            "option site_url must be an http:// or https:// address without a path, "
+            "such as http://192.0.2.10:8000."
+        )
+    return value.rstrip("/")
 
 
 def _oidc(options: Mapping[str, Any]) -> dict[str, str]:
