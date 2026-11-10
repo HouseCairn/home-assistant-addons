@@ -44,7 +44,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Home Assistant app linter
-        uses: frenck/action-addon-linter@d51677290aef26cdfc835271dd3c7343ce502809 # v2.21.2
+        uses: frenck/action-app-linter@d51677290aef26cdfc835271dd3c7343ce502809 # v2.21.2
         with:
           path: ./housecairn
 
