@@ -36,7 +36,7 @@ Housecairn: change it here.
 | Host names (`allowed_hosts`) | The names and addresses you type in the browser to reach Home Assistant, such as `homeassistant.local` or `192.0.2.10`, one per line. Housecairn refuses any other. An IPv6 address goes in brackets: `[2001:db8::1]`. `*` is refused. |
 | Default language (`default_language`) | `en` or `fr`, for browsers that ask for no language Housecairn offers. |
 | Time zone (`time_zone`) | Such as `Europe/Paris`: it decides what "today" is. Empty: the time zone of Home Assistant. |
-| Open sign-up (`signup_open`) | Lets anyone create an account from the sign-up page. Leave it off: it needs outgoing email and HTTPS (see [Limits](#limits)). |
+| Open sign-up (`signup_open`) | Lets anyone create an account from the sign-up page. Leave it off: it needs outgoing email and HTTPS (see [Limits](#limits)). Housecairn does not start with open sign-up and no outgoing email server configured, and the email settings are in its administration screens, which need a first administrator: leave it off at first. |
 | Single sign-on (`oidc_server_url`, `oidc_client_id`, `oidc_client_secret`, `oidc_provider_name`) | An OpenID Connect provider for sign-in. `oidc_server_url` is the issuer, an `https://` address; the client identifier is then required. See [Single sign-on](https://docs.housecairn.app/administration/oidc/). |
 | First administrator (`bootstrap_admin_email`) | With single sign-on: only the person with this address, verified by the provider, can become the first administrator. |
 
