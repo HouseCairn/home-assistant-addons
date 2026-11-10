@@ -3,8 +3,8 @@ configuration:
     name: Host names
     description: >-
       Names and addresses you type in the browser to reach Home Assistant,
-      such as homeassistant.local or 192.0.2.10. Housecairn refuses any other.
-      An IPv6 address goes in brackets.
+      such as homeassistant.local or 192.0.2.10, remote access included.
+      Housecairn refuses any other. An IPv6 address goes in brackets.
   default_language:
     name: Default language
     description: >-
@@ -20,6 +20,14 @@ configuration:
     description: >-
       Anyone may create an account from the sign-up page. Needs outgoing email
       and HTTPS: leave it off in this version.
+  site_url:
+    name: Public address
+    description: >-
+      Address that reaches Housecairn without Home Assistant, such as its port,
+      http://192.0.2.10:8000, without a path. Links of invitations, calendar
+      feeds, QR labels and emails are built on it. Empty: editable in
+      Housecairn, and those links, when made through Home Assistant, do not
+      work outside it.
   oidc_server_url:
     name: Single sign-on issuer
     description: >-
@@ -42,4 +50,6 @@ configuration:
       With single sign-on: only this address, verified by the provider, can
       become the first administrator.
 network:
-  8000/tcp: Web interface of Housecairn (plain HTTP)
+  8000/tcp: >-
+    Web interface of Housecairn, in plain HTTP. Not needed with ingress; needed
+    for calendar feeds, QR labels and links of emails.

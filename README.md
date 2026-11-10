@@ -25,9 +25,10 @@ documentation is at <https://docs.housecairn.app>.
 3. Find **Housecairn** in the list, install it, then read its
    **Documentation** tab before you start it.
 
-The app is **experimental**: it opens on its own port, without HTTPS and
-without the Home Assistant sidebar for now. See
-[housecairn/DOCS.md](housecairn/DOCS.md) for what that means.
+The app is **experimental**: it opens inside Home Assistant, through ingress,
+and links meant to be opened elsewhere (calendar feeds, QR labels, emails) need
+its optional port, in plain HTTP. See [housecairn/DOCS.md](housecairn/DOCS.md)
+for what that means.
 
 ## Development
 

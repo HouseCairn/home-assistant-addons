@@ -6,7 +6,9 @@ on /data (created by root) and writes the options there, in
 unprivileged user 10001 and reads environment variables. This script bridges
 the two, then gets out of the way:
 
-1. read /data/options.json and turn the options into HouseCairn's variables;
+1. read /data/options.json and turn the options into HouseCairn's variables,
+   then add those of Ingress (the path prefix from X-Ingress-Path, trusted
+   from the Supervisor only, and frames of the same origin allowed);
 2. give /data and what is in it to 10001:10001 (the Supervisor creates the
    folder, and restores backups, as root), except options.json;
 3. drop root for good (groups, group, user) and replace itself with
@@ -31,6 +33,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 DATA_DIR = Path("/data")
 OPTIONS_FILE = DATA_DIR / "options.json"
@@ -40,9 +43,31 @@ APP_GID = 10001
 # HouseCairn's entry point, with the Python of its virtual environment.
 ENTRYPOINT = ("/app/.venv/bin/python", "-m", "housecairn.entrypoint")
 # Never passed to HouseCairn: the Supervisor's API tokens (HouseCairn does not
-# call the Supervisor), and SECRET_KEY, which HouseCairn generates once in
-# /data/secret_key when the variable is unset.
-DROPPED_VARIABLES = ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "SECRET_KEY")
+# call the Supervisor), SECRET_KEY, which HouseCairn generates once in
+# /data/secret_key when the variable is unset, and a fixed path prefix, which
+# would limit the cookies to a path the Ingress addresses do not share (D9).
+DROPPED_VARIABLES = ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "SECRET_KEY", "HOUSECAIRN_URL_PREFIX")
+
+# The Supervisor's address on its internal network: every Ingress request
+# reaches the app from there ("Your web server only ever sees requests from
+# the Supervisor, at 172.30.32.2", developer documentation, Ingress; the
+# Supervisor's code: DOCKER_IPV4_NETWORK_MASK[2] in supervisor/const.py).
+SUPERVISOR_ADDRESS = "172.30.32.2"
+# Ingress (D9). The Supervisor serves the app under
+# /api/hassio_ingress/<token>/ and names that path in X-Ingress-Path: HouseCairn
+# reads it there, but only from the Supervisor, whose X-Forwarded-Proto also
+# tells it whether the browser reached Home Assistant over HTTPS. From any other
+# peer, such as a browser on the app's own port, HouseCairn removes these
+# headers. Home Assistant shows the app in a frame of its own page, on the same
+# origin: HouseCairn, which refuses every frame by default, then allows that
+# origin and no other to frame it. Set last: neither an option nor a variable
+# of the container changes them.
+INGRESS_VARIABLES = {
+    "HOUSECAIRN_URL_PREFIX_HEADER": "X-Ingress-Path",
+    "HOUSECAIRN_FORWARDED_ALLOW_IPS": SUPERVISOR_ADDRESS,
+    "HOUSECAIRN_BEHIND_TLS_PROXY": "true",
+    "HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING": "true",
+}
 
 LANGUAGES = ("en", "fr")
 # One label of a host name: letters, digits and hyphens, not at either end.
@@ -149,10 +174,48 @@ def environment_from_options(
 
     env.update(_oidc(options))
 
+    site_url = _site_url(options)
+    if site_url:
+        env["HOUSECAIRN_SITE_URL"] = site_url
+
     admin_email = _text(options, "bootstrap_admin_email")
     if admin_email:
         env["HOUSECAIRN_BOOTSTRAP_ADMIN_EMAIL"] = admin_email
+
+    env.update(INGRESS_VARIABLES)
     return env
+
+
+def _site_url(options: Mapping[str, Any]) -> str:
+    """The public address, scheme and host only, as HouseCairn accepts it; empty when unset.
+
+    HouseCairn builds every link meant to leave it (invitations, emails, QR
+    labels, calendar feeds) on this address, never on the ingress path, which
+    only opens inside Home Assistant (D9). It has no path: the app serves
+    HouseCairn at the root of the port, and drops HOUSECAIRN_URL_PREFIX.
+    """
+    value = _text(options, "site_url")
+    if not value:
+        return ""
+    try:
+        parts = urlsplit(value)
+        valid = (
+            parts.scheme in ("http", "https")
+            and bool(parts.hostname)
+            and not parts.path.strip("/")
+            and not (parts.query or parts.fragment)
+            and parts.username is None
+            and parts.password is None
+            and (parts.port is None or parts.port > 0)
+        )
+    except ValueError:  # brackets that do not hold an address, a port out of range
+        valid = False
+    if not valid:
+        raise OptionError(
+            "option site_url must be an http:// or https:// address without a path, "
+            "such as http://192.0.2.10:8000."
+        )
+    return value.rstrip("/")
 
 
 def _oidc(options: Mapping[str, Any]) -> dict[str, str]:
