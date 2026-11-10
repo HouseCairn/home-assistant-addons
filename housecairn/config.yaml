@@ -1,0 +1,65 @@
+# Housecairn as a Home Assistant app.
+# Keys: https://contributors.home-assistant.io/apps/reference/configuration/
+# Why each choice: docs/decisions.md.
+name: Housecairn
+# The HouseCairn image this app is built from (Dockerfile): a tag published
+# on ghcr.io/housecairn/housecairn. Change both together (D4).
+version: "sha-623e794"
+slug: housecairn
+description: >-
+  Plan home maintenance and renovation work: what to do in the house, where,
+  when, with what and for how much.
+url: https://github.com/HouseCairn/home-assistant-addons/tree/main/housecairn
+# HouseCairn's image is published for linux/amd64 and linux/arm64.
+arch:
+  - aarch64
+  - amd64
+stage: experimental
+# No `image`: the Supervisor builds the Dockerfile of this folder on the
+# device, a thin layer over HouseCairn's published multi-architecture image
+# (D2). HouseCairn's image cannot be used as is: it runs as user 10001 and the
+# Supervisor creates /data and options.json as root.
+#
+# The web interface, on its own port until ingress comes (D5). Plain HTTP:
+# see DOCS.md.
+ports:
+  8000/tcp: 8000
+webui: http://[HOST]:[PORT:8000]
+# Health: the HEALTHCHECK of the Dockerfile (the linter refuses `watchdog`).
+#
+# Least privilege (D6): no `map` (only the app's private /data, always
+# mounted), no host network, no added capability, no hardware, no API access,
+# and Docker's default AppArmor profile. /tmp in memory, as in HouseCairn's
+# compose.yaml.
+tmpfs: true
+# Seconds to stop: HouseCairn gives its web server and task worker 20 s.
+timeout: 30
+# Stopped during a backup, so the SQLite database and its WAL file are copied
+# in a consistent state (D7).
+backup: cold
+# Variables that do not depend on the user. The app is reached in plain HTTP
+# on its port: no redirection to HTTPS, no HSTS, and cookies that are not
+# limited to HTTPS (D5). Everything else keeps HouseCairn's safe defaults.
+environment:
+  SECURE_SSL_REDIRECT: "false"
+  SECURE_HSTS_SECONDS: "0"
+  SESSION_COOKIE_SECURE: "false"
+  CSRF_COOKIE_SECURE: "false"
+# Options, turned into HouseCairn's variables by run.py (D3). Only
+# allowed_hosts is required; an option left empty keeps HouseCairn's default
+# and, where HouseCairn has the setting in its interface, leaves it editable
+# there.
+options:
+  allowed_hosts:
+    - homeassistant.local
+schema:
+  allowed_hosts:
+    - "match(^(\\.?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\\[[0-9A-Fa-f:.]+\\])$)"
+  default_language: list(en|fr)?
+  time_zone: "match(^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$)?"
+  signup_open: bool?
+  oidc_server_url: url?
+  oidc_client_id: str?
+  oidc_client_secret: password?
+  oidc_provider_name: str(1,64)?
+  bootstrap_admin_email: email?
