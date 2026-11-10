@@ -1,0 +1,5 @@
+# Home Assistant app repository.
+# https://contributors.home-assistant.io/apps/reference/files/#repository
+name: Housecairn
+url: https://github.com/HouseCairn/home-assistant-addons
+maintainer: Robvred

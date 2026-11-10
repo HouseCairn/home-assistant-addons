@@ -1,0 +1,67 @@
+# Checks of every pull request and of main: yamllint on the whole repository,
+# the app linter that the Home Assistant example repository uses
+# (https://github.com/home-assistant/apps-example), and the tests of the start
+# script of the app. Actions are pinned by full commit SHA, with their tag in
+# the comment; Dependabot updates both.
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  yamllint:
+    name: yamllint
+    # ubuntu-24.04 ships yamllint (1.38.0 in the image of 2026-11-01): nothing
+    # is downloaded. Pinned rather than ubuntu-latest, which moves to 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: yamllint
+        run: |
+          yamllint --version
+          yamllint --strict .
+
+  app-lint:
+    name: App lint (housecairn)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Home Assistant app linter
+        uses: frenck/action-app-linter@d51677290aef26cdfc835271dd3c7343ce502809 # v2.21.2
+        with:
+          path: ./housecairn
+
+  start-script:
+    name: Start script tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Python of the runner (3.12); the script only uses the standard
+      # library, and the image runs it with Python 3.13.
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+      # Again as root, as the script starts in the container: this runs the
+      # tests that drop root for real and the ownership changes.
+      - name: Unit tests as root
+        run: sudo python3 -m unittest discover -s tests -v

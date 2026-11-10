@@ -1,0 +1,46 @@
+configuration:
+  allowed_hosts:
+    name: Noms d'hôte
+    description: >-
+      Noms et adresses que vous tapez dans le navigateur pour joindre Home
+      Assistant, comme homeassistant.local ou 192.0.2.10. Housecairn refuse
+      tout autre nom. Une adresse IPv6 s'écrit entre crochets.
+  default_language:
+    name: Langue par défaut
+    description: >-
+      Pour les navigateurs qui ne demandent aucune langue proposée par
+      Housecairn. Vide : anglais, modifiable dans Housecairn.
+  time_zone:
+    name: Fuseau horaire
+    description: >-
+      Par exemple Europe/Paris : il décide de ce qu'est « aujourd'hui ». Vide :
+      le fuseau horaire de Home Assistant.
+  signup_open:
+    name: Inscription ouverte
+    description: >-
+      Chacun peut créer un compte depuis la page d'inscription. Demande l'envoi
+      d'e-mails et HTTPS : laissez-la fermée dans cette version.
+  oidc_server_url:
+    name: Émetteur de l'authentification unique
+    description: >-
+      Adresse du fournisseur OpenID Connect (émetteur), comme
+      https://id.example.com. Vide : pas d'authentification unique depuis les
+      options.
+  oidc_client_id:
+    name: Identifiant client de l'authentification unique
+    description: L'identifiant client donné par le fournisseur.
+  oidc_client_secret:
+    name: Secret client de l'authentification unique
+    description: Le secret client donné par le fournisseur, s'il en donne un.
+  oidc_provider_name:
+    name: Nom du bouton d'authentification unique
+    description: >-
+      Nom du fournisseur sur le bouton de connexion, comme SSO de l'entreprise.
+      Vide : Authentification unique.
+  bootstrap_admin_email:
+    name: Premier administrateur
+    description: >-
+      Avec l'authentification unique : seule cette adresse, vérifiée par le
+      fournisseur, peut devenir le premier administrateur.
+network:
+  8000/tcp: Interface web de Housecairn (HTTP sans chiffrement)

@@ -1,0 +1,45 @@
+configuration:
+  allowed_hosts:
+    name: Host names
+    description: >-
+      Names and addresses you type in the browser to reach Home Assistant,
+      such as homeassistant.local or 192.0.2.10. Housecairn refuses any other.
+      An IPv6 address goes in brackets.
+  default_language:
+    name: Default language
+    description: >-
+      For browsers that ask for no language Housecairn offers. Empty: English,
+      editable in Housecairn.
+  time_zone:
+    name: Time zone
+    description: >-
+      Such as Europe/Paris: it decides what "today" is. Empty: the time zone of
+      Home Assistant.
+  signup_open:
+    name: Open sign-up
+    description: >-
+      Anyone may create an account from the sign-up page. Needs outgoing email
+      and HTTPS: leave it off in this version.
+  oidc_server_url:
+    name: Single sign-on issuer
+    description: >-
+      Address of the OpenID Connect provider (issuer), such as
+      https://id.example.com. Empty: no single sign-on from the options.
+  oidc_client_id:
+    name: Single sign-on client ID
+    description: The client identifier given by the provider.
+  oidc_client_secret:
+    name: Single sign-on client secret
+    description: The client secret given by the provider, if it gave one.
+  oidc_provider_name:
+    name: Single sign-on button name
+    description: >-
+      Name of the provider on the sign-in button, such as Company SSO. Empty:
+      Single sign-on.
+  bootstrap_admin_email:
+    name: First administrator
+    description: >-
+      With single sign-on: only this address, verified by the provider, can
+      become the first administrator.
+network:
+  8000/tcp: Web interface of Housecairn (plain HTTP)
