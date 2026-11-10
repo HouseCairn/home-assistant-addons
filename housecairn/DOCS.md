@@ -20,6 +20,8 @@ is off by default (see [The port](#the-port)).
 3. On the **Configuration** tab, check **Host names** (below), then save.
 4. On the **Info** tab, select **Start**, then **Open web UI**. Turn on
    **Show in sidebar** to keep it at hand.
+5. Create the first administrator with the code of the **Log** tab: see
+   [First start](#first-start).
 
 The app runs on 64-bit systems only: `amd64` (most PCs and mini PCs) and
 `aarch64` (Raspberry Pi 4 and 5, Home Assistant Green and Yellow, with a 64-bit
@@ -38,6 +40,7 @@ Housecairn: change it here.
 | Default language (`default_language`) | `en` or `fr`, for browsers that ask for no language Housecairn offers. |
 | Time zone (`time_zone`) | Such as `Europe/Paris`: it decides what "today" is. Empty: the time zone of Home Assistant. |
 | Open sign-up (`signup_open`) | Lets anyone create an account from the sign-up page. Leave it off: it needs outgoing email and HTTPS (see [Limits](#limits)). Housecairn does not start with open sign-up and no outgoing email server configured, and the email settings are in its administration screens, which need a first administrator: leave it off at first. |
+| Public address (`site_url`) | The address that reaches Housecairn without Home Assistant, such as [the port](#the-port) (`http://192.0.2.10:8000`), without a path. The links of invitations, calendar feeds, QR labels and emails are built on it: see [Links meant for outside](#links-meant-for-outside-home-assistant). |
 | Single sign-on (`oidc_server_url`, `oidc_client_id`, `oidc_client_secret`, `oidc_provider_name`) | An OpenID Connect provider for sign-in. `oidc_server_url` is the issuer, an `https://` address; the client identifier is then required. See [Single sign-on](https://docs.housecairn.app/administration/oidc/). |
 | First administrator (`bootstrap_admin_email`) | With single sign-on: only the person with this address, verified by the provider, can become the first administrator. |
 
@@ -64,25 +67,39 @@ HTTPS), from Home Assistant's Supervisor only.
 - **The token of the address is set when the app is installed.** It stays the
   same across restarts and updates, and changes if the app is uninstalled and
   installed again.
+- **Shown in a frame of Home Assistant.** Housecairn lets a page of the same
+  address (scheme, name and port) show it in a frame, as Home Assistant does,
+  and no other site.
 
-**Links meant to be opened outside Home Assistant** do not work through
-ingress: calendar feeds, QR labels, invitations, and the links of emails and
-reminders. Home Assistant only lets a request through to the app when it
-comes from a browser with an ingress session, which its own interface opens: a
-calendar app, or a phone that scans a label, has none. Reminders, sent in the
-background, never hold the ingress address: their links start at the root of
-Housecairn's **Public address**, and they have none while it is empty. To use
-these links, turn on [the port](#the-port), set
-Housecairn's **Public address** to it (such as `http://192.0.2.10:8000`), and
-create the feeds, labels and invitations from the port: created through
-ingress, they hold the ingress address.
+### Links meant for outside Home Assistant
+
+Calendar feeds, QR labels, invitations, and the links of emails and reminders
+are opened by something other than Home Assistant's interface: a calendar app,
+a phone that scans a label, a mail client. The ingress address does not work
+for them: Home Assistant only lets a request through to the app when it comes
+from a browser with an ingress session, which its own interface opens.
+
+So Housecairn never puts the ingress address in these links: it builds them on
+its **Public address** (`site_url`), wherever they are created.
+
+1. Turn on [the port](#the-port), or use another address that reaches the app
+   without Home Assistant.
+2. Set **Public address** to it, such as `http://192.0.2.10:8000`, without a
+   path, and add its name or address to **Host names**. Restart the app.
+
+**Without a public address, these links do not work outside Home
+Assistant.** Created through ingress, they hold the address of Home Assistant
+without the ingress path, which leads nowhere; created on the port, they hold
+the port's address. Reminders and report alerts, sent in the background, carry
+no link at all.
 
 ## The port
 
 Housecairn can also be opened on a port of the host, in plain HTTP, for the
 links above or from a device without Home Assistant's interface. It is off by
-default. To turn it on, on the **Configuration** tab, under **Network**, give
-`8000/tcp` a port number, such as `8000`, save and restart the app. Then open
+default; it was on in the first version of the app (see the changelog). To
+turn it on, on the **Configuration** tab, under **Network**, give `8000/tcp` a
+port number, such as `8000`, save and restart the app. Then open
 `http://<address of Home Assistant>:8000`.
 
 - **Open it with another address than Home Assistant**, such as its IP address
@@ -100,6 +117,20 @@ default. To turn it on, on the **Configuration** tab, under **Network**, give
 Housecairn creates no account and has no default password. The first
 administrator comes from one of these:
 
+- **The first-account screen**, the usual way. At each start, while there is
+  no administrator, Housecairn writes a one-time code in its log:
+
+  1. On the **Log** tab of the app, find the lines that start with
+     `HouseCairn has no administrator yet.` and copy the
+     **First-account code** (such as `7QKF-3MZB-XJ2D-...`).
+  2. Open the web UI. The sign-in page links to the first-account screen
+     (`/setup/`) while it is open: follow the link, give the code, your name,
+     your email address and a password.
+
+  The code works once and expires after an hour; restart the app for a new
+  one. The address written next to it is that of the **Public address**, or
+  just `/setup/` while it is empty: through ingress, use the link of the
+  sign-in page instead. Only Home Assistant administrators can read the log.
 - **Single sign-on.** Set the single sign-on options, preferably with
   **First administrator**, and restart the app. The first person to sign in
   through the provider becomes the administrator. Single sign-on goes through
@@ -109,10 +140,9 @@ administrator comes from one of these:
   `http://192.0.2.10:8000/accounts/oidc/oidc/login/callback/`. Many
   providers only accept `https://` redirect addresses outside `localhost`:
   check yours.
-- **A screen in Housecairn (coming).** Creating the first administrator from a
-  web page of the application, without single sign-on or a shell, is planned
-  and not available yet. Until then, use single sign-on or the command line.
-- **A local account, from the command line**, in the meantime. This needs a shell with access
+  The first-account screen and single sign-on both create the first
+  administrator; the first one used closes the other.
+- **A local account, from the command line**. This needs a shell with access
   to Docker on the host (for example the community SSH app with protection
   mode off). Find the name of the container with `docker ps` (it ends with
   `housecairn`), then:
@@ -153,7 +183,9 @@ Going back to an older version after a migration needs the backup.
 ## Limits
 
 - **Links meant for outside Home Assistant** (calendar feeds, QR labels,
-  invitations, emails) need the port: see [Ingress](#ingress).
+  invitations, emails) need a public address that reaches the app without
+  Home Assistant, such as the port: see
+  [Links meant for outside](#links-meant-for-outside-home-assistant).
 - **Plain HTTP on the port**, and through ingress when Home Assistant itself is
   reached in plain HTTP: passwords and session cookies cross your local network
   in clear. Use it on a network you trust.

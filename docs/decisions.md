@@ -218,23 +218,28 @@ How ingress and the port share one server:
 
 Consequences, in `DOCS.md`:
 
-- **Links meant for outside Home Assistant.** A link built during an ingress
-  request holds the ingress address (calendar feeds, QR labels, invitations),
-  and the Supervisor only serves it to a browser with an ingress session,
-  which Home Assistant's interface opens. Links built in the background
-  (reminders) have no request: they use `HOUSECAIRN_URL_PREFIX`, empty here,
-  so they lead to the root of HouseCairn's public address, which only the port
-  serves. Those links need the port, and the public address set to it.
+- **Links meant for outside Home Assistant.** The ingress address only opens
+  in a browser with an ingress session, which Home Assistant's interface
+  opens: a calendar app or a phone that scans a label has none. Since
+  `sha-4be6010` (HouseCairn #89, ADR 0055), HouseCairn builds every link meant
+  to leave it (calendar feeds, QR labels, invitations, emails, reminders) on
+  `HOUSECAIRN_SITE_URL` and the fixed `HOUSECAIRN_URL_PREFIX`, never on the
+  prefix of the request. The app offers the public address as an option,
+  `site_url` (D3), without a path since the fixed prefix is removed: it must
+  reach the app without Home Assistant, such as the port. Without it, a link
+  made through ingress holds Home Assistant's address without the ingress
+  path, which leads nowhere, and reminders carry no link: `DOCS.md` says so.
 - **Sign-in rate limits.** The Supervisor appends the address of its own peer,
   Home Assistant Core, to `X-Forwarded-For`; HouseCairn takes the right-most
   address that is not a trusted proxy, so every ingress request counts as Home
   Assistant's. Trusting Core's address as well would let requests on the port
   claim another client address, if they reach the app from the network's
   gateway: not done.
-- **HouseCairn's own sign-in.** The documentation suggests no second sign-in
-  behind ingress, and the Supervisor adds `X-Remote-User-Id` and related
-  headers for that. HouseCairn does not read them: its accounts, roles and
-  homes are its own, and its sign-in stays.
+- **HouseCairn's own sign-in, always.** The documentation suggests no second
+  sign-in behind ingress, and the Supervisor adds `X-Remote-User-Id` and
+  related headers for that. HouseCairn does not read them, and the app will
+  never sign anyone in from them (maintainer's decision, 2026-11-10): its
+  accounts, roles and homes are its own, and its sign-in stays.
 - **Single sign-on** through ingress would need the ingress token in the
   provider's redirect address: it goes through the port.
 
@@ -247,7 +252,13 @@ Rejected:
   an ingress session.
 - **Keeping the port on by default.** The documentation asks ingress apps to
   deny everything but the Supervisor, and the port is plain HTTP: it is opt-in,
-  for the links that need it.
+  for the links that need it (maintainer's decision, 2026-11-10, with the
+  change written first in the changelog for users of the first version).
+- **Single sign-on from the Supervisor's `X-Remote-User-*` headers**, never
+  (maintainer's decision, 2026-11-10; above).
+- **`panel_admin: true`**, which would hide the sidebar entry from users who
+  are not Home Assistant administrators: the whole household uses HouseCairn
+  (maintainer's decision, 2026-11-10).
 - **A second web server** listening for the Supervisor only: HouseCairn already
   refuses the forwarding headers from anyone else.
 
