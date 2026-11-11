@@ -56,16 +56,16 @@ environment:
   SECURE_HSTS_SECONDS: "0"
   SESSION_COOKIE_SECURE: "false"
   CSRF_COOKIE_SECURE: "false"
-# Options, turned into HouseCairn's variables by run.py (D3). Only
-# allowed_hosts is required; an option left empty keeps HouseCairn's default
-# and, where HouseCairn has the setting in its interface, leaves it editable
-# there.
+# Options, turned into HouseCairn's variables by run.py (D3). An option left
+# empty keeps HouseCairn's default and, where HouseCairn has the setting in
+# its interface, leaves it editable there. allowed_hosts is only used, and
+# then required, when the port is published on the host: through ingress
+# alone, every host name is accepted (D10).
 options:
-  allowed_hosts:
-    - homeassistant.local
+  allowed_hosts: []
 schema:
   allowed_hosts:
-    - "match(^(\\.?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\\[[0-9A-Fa-f:.]+\\])$)"
+    - "match(^(\\.?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\\[[0-9A-Fa-f:.]+\\])$)?"
   default_language: list(en|fr)?
   time_zone: "match(^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$)?"
   signup_open: bool?

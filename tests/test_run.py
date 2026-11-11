@@ -5,12 +5,15 @@ Standard library only: python3 -m unittest discover -s tests -v
 
 from __future__ import annotations
 
+import http.server
 import importlib.util
 import json
 import os
 import shutil
+import socketserver
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -49,14 +52,23 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(env["ALLOWED_HOSTS"], "homeassistant.local,192.0.2.10,[2001:db8::1]")
 
     def test_bad_hosts_are_refused(self) -> None:
-        for hosts in ([], None, ["*"], ["home assistant"], ["a,b"], ["-bad.example.com"], [3]):
-            with self.subTest(hosts=hosts), self.assertRaises(run.OptionError):
-                env_of({"allowed_hosts": hosts})
+        # Whether the port is published or not: a wrong entry is a mistake to show.
+        for published in (None, False, True):
+            for hosts in (["*"], ["home assistant"], ["a,b"], ["-bad.example.com"], [3], "a"):
+                with self.subTest(published=published, hosts=hosts), self.assertRaises(run.OptionError):
+                    run.environment_from_options({"allowed_hosts": hosts}, {}, published)
+
 
     def test_supervisor_tokens_and_secret_key_never_reach_the_app(self) -> None:
-        base = {"SUPERVISOR_TOKEN": "t", "HASSIO_TOKEN": "t", "SECRET_KEY": "k", "LANG": "C.UTF-8"}
+        base = {
+            "SUPERVISOR_TOKEN": "t",
+            "HASSIO_TOKEN": "t",
+            "SUPERVISOR_SOCKET": "/run/supervisor/api/supervisor.sock",
+            "SECRET_KEY": "k",
+            "LANG": "C.UTF-8",
+        }
         env = env_of(HOSTS, base)
-        for name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "SECRET_KEY"):
+        for name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "SUPERVISOR_SOCKET", "SECRET_KEY"):
             self.assertNotIn(name, env)
         self.assertEqual(env["LANG"], "C.UTF-8")
 
@@ -172,6 +184,193 @@ class IngressTests(unittest.TestCase):
         self.assertEqual({key: env_of(options)[key] for key in INGRESS}, INGRESS)
 
 
+class HostNameTests(unittest.TestCase):
+    """ALLOWED_HOSTS: every name through ingress alone, allowed_hosts once the port is published (D10)."""
+
+    def test_ingress_only_accepts_every_name(self) -> None:
+        for options in ({}, {"allowed_hosts": []}, {"allowed_hosts": None}, HOSTS):
+            with self.subTest(options=options):
+                env = run.environment_from_options(options, {}, False)
+                self.assertEqual(env["ALLOWED_HOSTS"], "*")
+                self.assertEqual({key: env[key] for key in INGRESS}, INGRESS)
+
+    def test_published_port_keeps_allowed_hosts(self) -> None:
+        env = run.environment_from_options({"allowed_hosts": ["homeassistant.local", "192.0.2.10"]}, {}, True)
+        self.assertEqual(env["ALLOWED_HOSTS"], "homeassistant.local,192.0.2.10")
+        # The trust of ingress does not change with the port.
+        self.assertEqual({key: env[key] for key in INGRESS}, INGRESS)
+
+    def test_published_port_without_allowed_hosts_is_refused_with_the_option_to_set(self) -> None:
+        for options in ({}, {"allowed_hosts": []}, {"allowed_hosts": None}):
+            with self.subTest(options=options):
+                with self.assertRaises(run.OptionError) as caught:
+                    run.environment_from_options(options, {}, True)
+                message = str(caught.exception)
+                self.assertIn("allowed_hosts", message)
+                self.assertIn("Host names", message)
+                self.assertIn("8000/tcp", message)
+
+    def test_a_name_not_listed_is_refused_and_the_log_names_the_option(self) -> None:
+        env = run.environment_from_options({"allowed_hosts": ["homeassistant.local"]}, {}, True)
+        accepted = env["ALLOWED_HOSTS"].split(",")
+        self.assertNotIn("*", accepted)
+        self.assertNotIn("192.0.2.10", accepted)
+        message = run.hosts_message(env, True)
+        self.assertIn("homeassistant.local", message)
+        self.assertIn("Bad request", message)
+        self.assertIn("Invalid HTTP_HOST header", message)
+        self.assertIn("add that name to Host names", message)
+        self.assertIn("allowed_hosts", message)
+
+    def test_ingress_only_log(self) -> None:
+        message = run.hosts_message({"ALLOWED_HOSTS": "*"}, False)
+        self.assertIn("not published", message)
+        self.assertIn("every host name", message)
+
+    def test_not_asked_uses_the_option_else_every_name(self) -> None:
+        # healthcheck, manage, backup: no call to the Supervisor.
+        self.assertEqual(env_of(HOSTS)["ALLOWED_HOSTS"], "homeassistant.local")
+        self.assertEqual(env_of({})["ALLOWED_HOSTS"], "*")
+
+
+def info(network: object) -> dict:
+    return {"result": "ok", "data": {"slug": "housecairn", "network": network}}
+
+
+class PortPublishedTests(unittest.TestCase):
+    """Reading `network` of GET /addons/self/info."""
+
+    def published(self, answer: object, **kwargs) -> bool:
+        return run.port_published({}, fetch=lambda base, timeout: answer, pause=lambda s: None, **kwargs)
+
+    def test_reads_the_host_port(self) -> None:
+        self.assertTrue(self.published(info({"8000/tcp": 8000})))
+        self.assertTrue(self.published(info({"8000/tcp": 18000})))
+        self.assertFalse(self.published(info({"8000/tcp": None})))
+        self.assertFalse(self.published(info({})))
+        self.assertFalse(self.published(info(None)))
+
+    def test_a_malformed_answer_is_an_error(self) -> None:
+        for answer in (
+            [],
+            {"result": "ok"},
+            {"result": "ok", "data": {"slug": "housecairn"}},
+            info([8000]),
+            info({"8000/tcp": "8000"}),
+            info({"8000/tcp": True}),
+        ):
+            with self.subTest(answer=answer), self.assertRaises(run.SupervisorError):
+                self.published(answer)
+
+    def test_retries_then_gives_up(self) -> None:
+        calls = []
+
+        def failing(base, timeout):
+            calls.append(timeout)
+            raise run.SupervisorError("down")
+
+        with self.assertRaises(run.SupervisorError):
+            run.port_published({}, fetch=failing, attempts=3, pause=lambda s: None)
+        self.assertEqual(len(calls), 3)
+
+        answers = iter([run.SupervisorError("starting"), info({"8000/tcp": None})])
+
+        def flaky(base, timeout):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        self.assertFalse(run.port_published({}, fetch=flaky, pause=lambda s: None))
+
+
+class FakeSupervisor(http.server.BaseHTTPRequestHandler):
+    """Answers GET /addons/self/info with the `network` of the server, as the Supervisor."""
+
+    def do_GET(self) -> None:
+        self.server.requests.append((self.path, self.headers.get("Authorization")))
+        if self.path != "/addons/self/info" or (
+            self.server.token and self.headers.get("Authorization") != f"Bearer {self.server.token}"
+        ):
+            self.send_response(403)
+            self.end_headers()
+            return
+        body = json.dumps(info(self.server.network)).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args) -> None:
+        pass
+
+
+class _UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+    def get_request(self):
+        conn, _ = super().get_request()
+        return conn, ("local", 0)
+
+
+def serve(server) -> None:
+    server.requests = []
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+
+def unix_supervisor(path: str, network: object) -> _UnixHTTPServer:
+    server = _UnixHTTPServer(path, FakeSupervisor)
+    server.network, server.token = network, None
+    serve(server)
+    return server
+
+
+class SelfInfoTests(unittest.TestCase):
+    """The real HTTP exchange, on a Unix socket and over TCP with the token."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_on_the_socket_without_a_token(self) -> None:
+        path = os.path.join(self.tmp.name, "supervisor.sock")
+        server = unix_supervisor(path, {"8000/tcp": None})
+        try:
+            self.assertFalse(run.port_published({"SUPERVISOR_SOCKET": path}))
+            server.network = {"8000/tcp": 8000}
+            self.assertTrue(run.port_published({"SUPERVISOR_SOCKET": path}))
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(server.requests, [("/addons/self/info", None)] * 2)
+
+    def test_over_tcp_with_the_token(self) -> None:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeSupervisor)
+        server.network, server.token = {"8000/tcp": 8000}, "secret-token"
+        serve(server)
+        port = server.server_address[1]
+        try:
+            fetch = lambda base, timeout: run.self_info(base, timeout, host="127.0.0.1", port=port)
+            self.assertTrue(run.port_published({"SUPERVISOR_TOKEN": "secret-token"}, fetch=fetch))
+            # A refused token is an error, and its message holds neither token nor answer.
+            with self.assertRaises(run.SupervisorError) as caught:
+                run.port_published({"SUPERVISOR_TOKEN": "wrong"}, fetch=fetch, attempts=1)
+            self.assertNotIn("wrong", str(caught.exception))
+            # A socket that does not answer falls back to the token.
+            base = {"SUPERVISOR_SOCKET": os.path.join(self.tmp.name, "absent.sock"), "SUPERVISOR_TOKEN": "secret-token"}
+            self.assertTrue(run.port_published(base, fetch=fetch))
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_without_socket_nor_token(self) -> None:
+        with self.assertRaises(run.SupervisorError):
+            run.self_info({}, 1.0)
+
+
 class LoadOptionsTests(unittest.TestCase):
     def test_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -260,48 +459,104 @@ class MainTests(unittest.TestCase):
     def test_refuses_to_start_without_root(self) -> None:
         self.assertEqual(run.main(["run"]), 1)
 
-    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
-    def test_start_as_root_ends_as_the_app_user(self) -> None:
+    def start(self, options: dict, network: object = "no supervisor", env: dict | None = None, command: str = "run"):
+        """Run the script as the container does, with a fake Supervisor on a socket."""
         import subprocess
 
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp, "data")
-            data.mkdir()
-            (data / "options.json").write_text(json.dumps({**HOSTS, "default_language": "fr"}))
-            os.chmod(data / "options.json", 0o600)
-            (data / "db.sqlite3").write_bytes(b"")  # as restored by the Supervisor: root's
-            env = {"PATH": "/usr/bin:/bin", "SUPERVISOR_TOKEN": "t", "TZ": "Europe/Paris"}
-            out = subprocess.run(
-                [sys.executable, "-I", "-c", DRIVER, str(SCRIPT), str(data), PROBE_PYTHON, "run"],
-                env=env, capture_output=True, text=True, check=True,
-            )
-            uid, gid, groups, args, child_env = json.loads(out.stdout)
-            self.assertEqual((uid, gid, groups), (run.APP_UID, run.APP_GID, []))
-            self.assertEqual(args, ["run"])
-            self.assertEqual(child_env["ALLOWED_HOSTS"], "homeassistant.local")
-            self.assertEqual(child_env["HOUSECAIRN_DEFAULT_LANGUAGE"], "fr")
-            self.assertEqual(child_env["TIME_ZONE"], "Europe/Paris")
-            self.assertNotIn("SUPERVISOR_TOKEN", child_env)
-            self.assertEqual({key: child_env[key] for key in INGRESS}, INGRESS)
-            self.assertEqual(os.stat(data).st_uid, run.APP_UID)
-            self.assertEqual(os.stat(data / "db.sqlite3").st_uid, run.APP_UID)
-            self.assertEqual(os.stat(data / "options.json").st_uid, 0)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data = Path(tmp.name, "data")
+        data.mkdir()
+        (data / "options.json").write_text(json.dumps(options))
+        os.chmod(data / "options.json", 0o600)
+        (data / "db.sqlite3").write_bytes(b"")  # as restored by the Supervisor: root's
+        base = {"PATH": "/usr/bin:/bin", **(env or {})}
+        self.server = None
+        if network != "no supervisor":
+            path = os.path.join(tmp.name, "supervisor.sock")
+            self.server = unix_supervisor(path, network)
+            self.addCleanup(self.server.server_close)
+            self.addCleanup(self.server.shutdown)
+            base["SUPERVISOR_SOCKET"] = path
+        out = subprocess.run(
+            [sys.executable, "-I", "-c", DRIVER, str(SCRIPT), str(data), PROBE_PYTHON, command],
+            env=base, capture_output=True, text=True, check=False, timeout=60,
+        )
+        return out, data
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_start_as_root_ends_as_the_app_user(self) -> None:
+        out, data = self.start(
+            {**HOSTS, "default_language": "fr"},
+            network={"8000/tcp": 8000},
+            env={"SUPERVISOR_TOKEN": "t", "TZ": "Europe/Paris"},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        uid, gid, groups, args, child_env = json.loads(out.stdout)
+        self.assertEqual((uid, gid, groups), (run.APP_UID, run.APP_GID, []))
+        self.assertEqual(args, ["run"])
+        self.assertEqual(child_env["ALLOWED_HOSTS"], "homeassistant.local")
+        self.assertEqual(child_env["HOUSECAIRN_DEFAULT_LANGUAGE"], "fr")
+        self.assertEqual(child_env["TIME_ZONE"], "Europe/Paris")
+        for name in ("SUPERVISOR_TOKEN", "SUPERVISOR_SOCKET"):
+            self.assertNotIn(name, child_env)
+        self.assertEqual({key: child_env[key] for key in INGRESS}, INGRESS)
+        self.assertEqual(os.stat(data).st_uid, run.APP_UID)
+        self.assertEqual(os.stat(data / "db.sqlite3").st_uid, run.APP_UID)
+        self.assertEqual(os.stat(data / "options.json").st_uid, 0)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_ingress_only_start_accepts_every_name(self) -> None:
+        for options in ({"allowed_hosts": []}, HOSTS):
+            with self.subTest(options=options):
+                out, _ = self.start(options, network={"8000/tcp": None})
+                self.assertEqual(out.returncode, 0, out.stderr)
+                child_env = json.loads(out.stdout)[4]
+                self.assertEqual(child_env["ALLOWED_HOSTS"], "*")
+                self.assertEqual({key: child_env[key] for key in INGRESS}, INGRESS)
+                self.assertIn("is not published on the host", out.stderr)
+                self.assertEqual(self.server.requests, [("/addons/self/info", None)])
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_published_port_start_keeps_allowed_hosts_and_names_the_option(self) -> None:
+        out, _ = self.start({"allowed_hosts": ["homeassistant.local", "192.0.2.10"]}, network={"8000/tcp": 8000})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], "homeassistant.local,192.0.2.10")
+        self.assertIn("homeassistant.local, 192.0.2.10", out.stderr)
+        self.assertIn("add that name to Host names", out.stderr)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_published_port_without_allowed_hosts_stops_before_anything_changes(self) -> None:
+        out, data = self.start({"allowed_hosts": []}, network={"8000/tcp": 8000})
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("allowed_hosts (Host names)", out.stderr)
+        self.assertEqual(out.stdout, "")
+        self.assertEqual(os.stat(data).st_uid, 0)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_no_answer_from_the_supervisor_counts_as_a_published_port(self) -> None:
+        out, _ = self.start(HOSTS)  # neither socket nor token
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], "homeassistant.local")
+        self.assertIn("could not ask the Supervisor", out.stderr)
+        out, data = self.start({"allowed_hosts": []})
+        self.assertEqual(out.returncode, 2)
+        self.assertEqual(os.stat(data).st_uid, 0)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_healthcheck_does_not_call_the_supervisor(self) -> None:
+        out, data = self.start({"allowed_hosts": []}, network={"8000/tcp": 8000}, command="healthcheck")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], "*")
+        self.assertEqual(self.server.requests, [])
+        self.assertEqual(os.stat(data).st_uid, 0)  # healthcheck leaves /data alone
 
     @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
     def test_bad_options_stop_before_anything_changes(self) -> None:
-        import subprocess
-
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp, "data")
-            data.mkdir()
-            (data / "options.json").write_text(json.dumps({"allowed_hosts": ["*"]}))
-            out = subprocess.run(
-                [sys.executable, "-I", "-c", DRIVER, str(SCRIPT), str(data), PROBE_PYTHON, "run"],
-                env={"PATH": "/usr/bin:/bin"}, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(out.returncode, 2)
-            self.assertIn("allowed_hosts", out.stderr)
-            self.assertEqual(os.stat(data).st_uid, 0)
+        out, data = self.start({"allowed_hosts": ["*"]}, network={"8000/tcp": None})
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("allowed_hosts", out.stderr)
+        self.assertEqual(os.stat(data).st_uid, 0)
 
 
 if __name__ == "__main__":

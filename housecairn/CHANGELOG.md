@@ -3,6 +3,22 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## 0.1.1 (unreleased)
+
+- **Host names is no longer needed through ingress.** At each start, the app
+  asks the Supervisor whether its port is open on the host. While it is
+  closed, the default, Housecairn can only be reached through Home Assistant's
+  ingress and accepts every name or address you use for Home Assistant: an IP
+  address or a remote access domain no longer gets "Bad request" on the first
+  start. **Host names** is now empty by default and only used once the port
+  is open, where it keeps its role, through ingress as on the port; the app
+  then refuses to start while it is empty, and its log names the option to
+  fill. Nothing to change if you set Host names already: it is kept, and used
+  whenever the port is open.
+- The app reads its own information from the Supervisor for this (the host
+  port of `8000/tcp`), which every app may do: still no access to the
+  Supervisor's or Home Assistant's API beyond that.
+
 ## 0.1.0
 
 The first version of the app with a version number: it is now built from

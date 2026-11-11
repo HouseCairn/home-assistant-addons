@@ -49,11 +49,10 @@ tab in Home Assistant), and Housecairn's at <https://docs.housecairn.app>.
    (or use the button above).
 3. Select **Housecairn**, then **Install**. The Supervisor builds the app on
    your device over Housecairn's image: about a minute.
-4. On the **Configuration** tab, check **Host names**: the names and addresses
-   you type to reach Home Assistant (such as `homeassistant.local`), then save.
-5. On the **Info** tab, select **Start**, then **Open web UI**. Turn on
-   **Show in sidebar** to keep it at hand.
-6. On the **Log** tab, copy the **First-account code**. In the web UI, follow
+4. On the **Info** tab, select **Start**, then **Open web UI**. Turn on
+   **Show in sidebar** to keep it at hand. Nothing to configure first:
+   through ingress, every name or address of Home Assistant works.
+5. On the **Log** tab, copy the **First-account code**. In the web UI, follow
    the link of the sign-in page to the first-account screen, and give the code,
    your name, your email address and a password.
 
@@ -69,7 +68,8 @@ Each step is detailed in [DOCS.md](housecairn/DOCS.md#install).
   **Write** (Write marks tasks done), choose the home, and copy the token,
   which is shown once. The integration needs an address that reaches the app
   without Home Assistant's interface, such as [the port](housecairn/DOCS.md#the-port),
-  with that name or address in **Host names**.
+  with that name or address in **Host names**, which applies once the port is
+  open ([Host names](housecairn/DOCS.md#host-names)).
 - Housecairn's own integrations (notifications, calendar feeds, API) work as in
   any other installation: see <https://docs.housecairn.app>.
 

@@ -17,10 +17,11 @@ is off by default (see [The port](#the-port)).
 2. Select **Housecairn**, then **Install**. The Supervisor builds the app on
    your device, over Housecairn's published image: it takes a minute or so,
    mostly to download that image.
-3. On the **Configuration** tab, check **Host names** (below), then save.
-4. On the **Info** tab, select **Start**, then **Open web UI**. Turn on
-   **Show in sidebar** to keep it at hand.
-5. Create the first administrator with the code of the **Log** tab: see
+3. On the **Info** tab, select **Start**, then **Open web UI**. Turn on
+   **Show in sidebar** to keep it at hand. Nothing to configure first:
+   through ingress, Housecairn opens under whatever name or address you use
+   for Home Assistant.
+4. Create the first administrator with the code of the **Log** tab: see
    [First start](#first-start).
 
 The app runs on 64-bit systems only: `amd64` (most PCs and mini PCs) and
@@ -29,14 +30,14 @@ system).
 
 ## Options
 
-Only **Host names** is required. An option you leave empty keeps Housecairn's
-default; where Housecairn also has the setting in its own administration
-screens, it stays editable there. An option you set locks that field in
-Housecairn: change it here.
+No option is required. An option you leave empty keeps Housecairn's default;
+where Housecairn also has the setting in its own administration screens, it
+stays editable there. An option you set locks that field in Housecairn:
+change it here.
 
 | Option | What it does |
 | --- | --- |
-| Host names (`allowed_hosts`) | The names and addresses you type in the browser to reach Home Assistant, such as `homeassistant.local` or `192.0.2.10`, one per line, including those of remote access (such as `ha.example.com`). Housecairn refuses any other: Home Assistant passes it the name the browser used. An IPv6 address goes in brackets: `[2001:db8::1]`. `*` is refused. |
+| Host names (`allowed_hosts`) | **Only used when [the port](#the-port) is open**, and then required. The names and addresses you type in the browser to reach Home Assistant and the port, such as `homeassistant.local` or `192.0.2.10`, one per line, including those of remote access (such as `ha.example.com`): Housecairn then refuses any other, through ingress as on the port. Through ingress alone, leave it empty: every name is accepted (see [Host names](#host-names)). An IPv6 address goes in brackets: `[2001:db8::1]`. `*` is refused. |
 | Default language (`default_language`) | `en` or `fr`, for browsers that ask for no language Housecairn offers. |
 | Time zone (`time_zone`) | Such as `Europe/Paris`: it decides what "today" is. Empty: the time zone of Home Assistant. |
 | Open sign-up (`signup_open`) | Lets anyone create an account from the sign-up page. Leave it off: it needs outgoing email and HTTPS (see [Limits](#limits)). Housecairn does not start with open sign-up and no outgoing email server configured, and the email settings are in its administration screens, which need a first administrator: leave it off at first. |
@@ -85,7 +86,8 @@ its **Public address** (`site_url`), wherever they are created.
 1. Turn on [the port](#the-port), or use another address that reaches the app
    without Home Assistant.
 2. Set **Public address** to it, such as `http://192.0.2.10:8000`, without a
-   path, and add its name or address to **Host names**. Restart the app.
+   path. With the port open, its name or address goes in **Host names** too.
+   Restart the app.
 
 **Without a public address, these links do not work outside Home
 Assistant.** Created through ingress, they hold the address of Home Assistant
@@ -99,18 +101,40 @@ Housecairn can also be opened on a port of the host, in plain HTTP, for the
 links above or from a device without Home Assistant's interface. It is off by
 default; it was on in the first version of the app (see the changelog). To
 turn it on, on the **Configuration** tab, under **Network**, give `8000/tcp` a
-port number, such as `8000`, save and restart the app. Then open
+port number, such as `8000`, then, on the same tab, list in **Host names**
+every name and address you use, for Home Assistant and for the port (see
+[Host names](#host-names)). Save and restart the app. Then open
 `http://<address of Home Assistant>:8000`.
 
 - **Open it with another address than Home Assistant**, such as its IP address
   when you reach Home Assistant by name: browsers keep cookies per name, not
   per port, so a sign-in on the port would also be sent to ingress and the two
   would get mixed up.
-- Its address must be in **Host names**, as for ingress. Requests on the port
-  are never taken for requests of the Supervisor: what they say about HTTPS or
-  about the address is ignored.
+- Requests on the port are never taken for requests of the Supervisor: what
+  they say about HTTPS or about the address is ignored.
 - Plain HTTP: passwords and session cookies cross your local network in clear.
   Do not expose this port to the Internet.
+
+### Host names
+
+Home Assistant passes Housecairn the name or address the browser used for Home
+Assistant (`homeassistant.local`, an IP address, a remote access domain).
+Housecairn checks it against a list, as any web application should when it
+can be reached directly. At each start, the app asks the Supervisor whether
+the port is open, and the **Log** tab says what it decided:
+
+- **Port closed** (the default): Housecairn can only be reached from Home
+  Assistant's internal network, in practice through ingress, behind Home
+  Assistant's sign-in. It accepts **every name**, and **Host names** is not
+  used.
+- **Port open**: anyone on your network can reach it, so it answers **only to
+  the names of Host names**, through ingress as on the port. The app does not
+  start while the list is empty, and says so in the log.
+
+A name that is not in the list gets a **Bad request** (400) page, and the
+**Log** tab shows `Invalid HTTP_HOST header: '<name>'`: add that name to
+**Host names** on the **Configuration** tab, then restart the app. If the app
+cannot reach the Supervisor at start, it acts as if the port were open.
 
 ## First start
 
