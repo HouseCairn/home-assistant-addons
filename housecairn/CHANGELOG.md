@@ -3,6 +3,31 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## 0.1.0
+
+The first version of the app with a version number: it is now built from
+`ghcr.io/housecairn/housecairn:0.1.0`, a release of Housecairn, instead of
+an image of a single commit. Its updates follow Housecairn's releases: 0.1.x
+for fixes, 0.2.0 for the next features. What Housecairn 0.1.0 brings since
+`sha-4be6010` is in its
+[release notes](https://github.com/HouseCairn/housecairn/releases/tag/v0.1.0),
+among them:
+
+- **Import tables from CSV files**, with a preview that writes nothing, then
+  every row in one go.
+- **Task templates**: about twenty common tasks of a home, in English and in
+  French.
+- **Repetition in one sentence** on the task form, and estimated durations up
+  to a year; the contractor of a task is chosen in a list.
+- **API tokens for a home that requires a sign-in provider**, as the Home
+  Assistant integration uses, and tasks without a date in the API.
+- Back links, **Cancel** and breadcrumbs that lead back to where you came from.
+
+Nothing to change in the app's configuration. On the first start after the
+update, Housecairn migrates its database: the heating season of a task or a
+project becomes a custom season of the same months, so nothing changes for
+them. Make a backup first, as for every update.
+
 ## sha-4be6010
 
 **Backward-incompatible: port 8000 is closed by default.** If you used
