@@ -5,6 +5,7 @@ planner for home maintenance and renovation work, as a Home Assistant app
 (formerly "add-on"), opened from Home Assistant's sidebar.
 
 [![Lint](https://github.com/HouseCairn/home-assistant-addons/actions/workflows/lint.yaml/badge.svg?branch=main)](https://github.com/HouseCairn/home-assistant-addons/actions/workflows/lint.yaml?query=branch%3Amain)
+[![Release](https://img.shields.io/github/v/release/HouseCairn/home-assistant-addons)](https://github.com/HouseCairn/home-assistant-addons/releases)
 ![Project stage: experimental](https://img.shields.io/badge/project%20stage-experimental-yellow.svg)
 ![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green.svg)
 ![Supports amd64](https://img.shields.io/badge/amd64-yes-green.svg)
