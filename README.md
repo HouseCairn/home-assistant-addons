@@ -90,9 +90,8 @@ From [DOCS.md](housecairn/DOCS.md#limits), where each is explained:
 
 ## Project status
 
-**Experimental, no version released yet.** The app's version is the tag of
-the Housecairn image it is built from (currently `sha-4be6010`), and
-Housecairn itself has no release yet; its first version, v0.1.0, is planned.
+**Experimental.** The app's version is the version of the Housecairn image it
+is built from (currently `0.1.0`, Housecairn's first release), a test version.
 Updates may change behaviour: read the [changelog](housecairn/CHANGELOG.md)
 and make a backup first.
 

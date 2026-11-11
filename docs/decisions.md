@@ -94,13 +94,13 @@ script makes sure it is unset.
 ## D4. Version: the tag of HouseCairn's image
 
 `version` in `config.yaml` is the tag of HouseCairn's image the Dockerfile is
-built from, so users see which HouseCairn they run. HouseCairn has no release
-yet: only `edge`, which moves, and `sha-<commit>` tags are published. The app
-uses a `sha-<commit>` tag; it will use `X.Y.Z` once HouseCairn publishes
-releases. `latest` is never used: the Supervisor would not see an update, and
-users would not all run the same image. The base image is also pinned by
-digest in the Dockerfile; tag, digest, `version` and the changelog change in
-the same commit.
+built from, so users see which HouseCairn they run. Since HouseCairn 0.1.0, the
+app uses the `X.Y.Z` tag of a HouseCairn release; before it, HouseCairn
+published only `edge`, which moves, and `sha-<commit>` tags, and the app used a
+`sha-<commit>` tag. `latest` is never used: the Supervisor would not see an
+update, and users would not all run the same image. The base image is also
+pinned by digest in the Dockerfile; tag, digest, `version` and the changelog
+change in the same commit.
 
 ## D5. Plain HTTP, through ingress and on the optional port
 
