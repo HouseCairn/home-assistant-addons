@@ -74,7 +74,7 @@ needed.
 
 | Option | Variable | When empty |
 | --- | --- | --- |
-| `allowed_hosts` (required) | `ALLOWED_HOSTS` | refused: HouseCairn answers to no host otherwise |
+| `allowed_hosts` | `ALLOWED_HOSTS` | `*` while the port is not published; refused once it is (D10) |
 | `default_language` | `HOUSECAIRN_DEFAULT_LANGUAGE` | `en`, editable in the interface |
 | `time_zone` | `TIME_ZONE` | the time zone of Home Assistant (`TZ`, set by the Supervisor) |
 | `signup_open` | `HOUSECAIRN_SIGNUP_OPEN` | closed, editable in the interface |
@@ -126,9 +126,11 @@ same instance may be reached through Home Assistant in plain HTTP.
 ## D6. Least privilege
 
 No `map` (only the app's private `/data`, which the Supervisor always mounts),
-no host network, no added Linux capability, no device, no access to the
-Supervisor or Home Assistant APIs, protection mode left on. `/tmp` is in
-memory (`tmpfs: true`), as in HouseCairn's `compose.yaml`.
+no host network, no added Linux capability, no device, no `hassio_api` nor
+`homeassistant_api`, protection mode left on. The start script reads the app's
+own information from the Supervisor, which every app may do without them
+(D10); HouseCairn itself never gets the Supervisor's token or socket path.
+`/tmp` is in memory (`tmpfs: true`), as in HouseCairn's `compose.yaml`.
 
 AppArmor: the Supervisor applies Docker's default profile. The documentation
 recommends a profile of the app's own, but asks to write it by running the app
@@ -159,7 +161,10 @@ copies would pile up in `/data/backups/`, which nothing removes.
 The Supervisor reads the image's `HEALTHCHECK`; `watchdog` is refused by the
 app linter. HouseCairn's probe sends a host name of `ALLOWED_HOSTS`, which the
 app sets from its options, not as a variable of the container: the Dockerfile
-runs the same probe through the start script.
+runs the same probe through the start script. The probe does not ask the
+Supervisor (every 30 seconds): it sends the first name of `allowed_hosts`,
+which the server accepts whether the port is published or not, or
+`localhost` when the option is empty, which only happens with `*` (D10).
 
 ## D9. Ingress, with the prefix of each request, trusted from the Supervisor
 
@@ -203,9 +208,10 @@ How ingress and the port share one server:
   the Supervisor: it never gets the ingress prefix, even if it sends the
   header, and is served at the root.
 - **`ALLOWED_HOSTS`.** HouseCairn checks the `Host` header, which Home
-  Assistant passes on unchanged (`X-Forwarded-Host` is not read): the option
-  lists every name used to reach Home Assistant, remote access included, and
-  the address used for the port.
+  Assistant passes on unchanged (`X-Forwarded-Host` is not read). With the
+  port published, the option lists every name used to reach Home Assistant,
+  remote access included, and the address used for the port; without it,
+  every name is accepted (D10).
 - **`CSRF_TRUSTED_ORIGINS`.** Not needed. The origin of a form is the browser's
   scheme and `Host`; HouseCairn compares it with its own, whose scheme comes
   from the Supervisor's `X-Forwarded-Proto` through ingress, and is HTTP on the
@@ -247,9 +253,9 @@ Rejected:
 
 - **A fixed prefix read from the Supervisor's API** (`ingress_entry` of
   `GET /addons/self/info`) at start-up, as HouseCairn's ADR 0055 suggests. It
-  needs `hassio_api` and a Supervisor token in the container, for links of
-  reminders that would hold the ingress address, which still only opens with
-  an ingress session.
+  would serve links of reminders that hold the ingress address, which still
+  only opens with an ingress session. (That endpoint needs no `hassio_api`,
+  as first written here: D10 reads it, for the port.)
 - **Keeping the port on by default.** The documentation asks ingress apps to
   deny everything but the Supervisor, and the port is plain HTTP: it is opt-in,
   for the links that need it (maintainer's decision, 2026-11-10, with the
@@ -268,3 +274,79 @@ sets it, and the frame of Home Assistant's ingress panel is of the same
 origin as the page around it, so it is allowed and a page of another site is
 not. On the port, the same headers apply: only a page of the port's own origin
 may frame it.
+
+## D10. Host names: every name through ingress alone, the list once the port is published
+
+Maintainer's decision, 2026-11-11: every host name is accepted by default when
+the app is reached through Home Assistant's ingress, and `allowed_hosts`
+applies only when the app's port is published on the host. Before it, the
+option held `homeassistant.local` by default, and whoever opened Home
+Assistant by an IP address or a remote access domain got "Bad request" on the
+first start.
+
+**What it rests on: the port bindings of the container, from the
+Supervisor.** The Supervisor creates the container with the port bindings of
+the app's `network` setting (`ports` of `DockerApp`,
+`supervisor/docker/app.py`): a container port without a host port is not
+bound at all. It returns the same setting as `network` in the app's own
+information, `GET /addons/self/info` (`info_data` in `supervisor/api/apps.py`),
+which every app may read without `hassio_api` (`api_bypass` in
+`supervisor/api/middleware/security.py`). The start script asks for it once,
+on `run`, before HouseCairn starts: on the Supervisor's Unix socket when it
+mounts one (`SUPERVISOR_SOCKET`, Supervisor `main` in November 2026: the
+socket names the app, no token), else on the internal network with the app's
+token (`SUPERVISOR_TOKEN`, Supervisor 2026.11.0). Neither reaches HouseCairn,
+and nothing of the answer is logged (it holds the app's options).
+
+- **`8000/tcp` without a host port** (the default): HouseCairn's port is only
+  reachable on the Supervisor's internal network, `172.30.32.0/23`, in
+  practice by the Supervisor's ingress, behind Home Assistant's sign-in and
+  the ingress session. `ALLOWED_HOSTS` is `*`; `allowed_hosts` is not used.
+- **`8000/tcp` with a host port**: anyone on the local network may reach the
+  port. `ALLOWED_HOSTS` is `allowed_hosts`, for ingress and the port alike
+  (one Django setting for one server), as before; the app does not start
+  while it is empty.
+- **No answer** (no socket nor token, an error, an answer without `network`),
+  after three attempts: the app acts as if the port were published, the
+  stricter case, and says so in the log.
+
+Why it is safe: the mode is set at start from the Supervisor's answer, and
+nothing a browser sends changes it. No header is trusted for it: not `Host`
+nor `X-Forwarded-Host`, which the browser chooses; not `X-Ingress-Path` nor
+the Supervisor's `X-Remote-User-*`, which a browser on the port could send
+(HouseCairn removes the first one from any peer but `172.30.32.2`, D9, but
+Django checks `Host` before any view, with one list for every request). The
+trusted proxy stays `172.30.32.2` alone. `ALLOWED_HOSTS` is not an access
+control: software on the internal network (other apps, Home Assistant Core)
+could already send any listed name.
+
+What `*` leaves open: without a **Public address** (`site_url`), HouseCairn
+builds the links of its emails (invitations, password resets) on the `Host`
+of the request that triggers them. Through ingress alone, a signed-in Home
+Assistant user, or software on the internal network, could then have such a
+link point to another site. Those links do not work through ingress anyway
+without a public address (D9), and with `site_url` set, HouseCairn takes its
+host from there, never from the request (`on_site` in
+`src/housecairn/accounts/adapters.py`).
+
+What the user sees: at each start, the log says whether the port is
+published and which names are accepted. A name that is not in the list gets
+HouseCairn's "Bad request" (400) page, and the log Django's line
+`Invalid HTTP_HOST header: '<name>'. You may need to add '<name>' to
+ALLOWED_HOSTS.`; the start message and `DOCS.md` say that the option to fill
+is **Host names**. A page that names the option itself would need a change in
+HouseCairn.
+
+The healthcheck does not ask the Supervisor (D8). `allowed_hosts` is now
+optional in the schema and empty by default; a list already saved is kept.
+
+Rejected:
+
+- **A check per request, by peer address** (any name from `172.30.32.2`, the
+  list from anyone else), which would keep ingress open to every name with
+  the port published. Django checks one `ALLOWED_HOSTS` for the whole server:
+  it needs a change in HouseCairn.
+- **`*` in every case.** With the port published, anyone on the network could
+  choose the host of the links HouseCairn builds.
+- **Keeping `homeassistant.local` as the default.** Harmless, but it reads as
+  a restriction that does not apply through ingress alone.

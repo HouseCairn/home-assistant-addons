@@ -2,9 +2,11 @@ configuration:
   allowed_hosts:
     name: Host names
     description: >-
-      Names and addresses you type in the browser to reach Home Assistant,
-      such as homeassistant.local or 192.0.2.10, remote access included.
-      Housecairn refuses any other. An IPv6 address goes in brackets.
+      Only when the port 8000/tcp is open (Network): the names and addresses
+      you type to reach Home Assistant and the port, such as
+      homeassistant.local or 192.0.2.10, remote access included; Housecairn
+      then refuses any other. Through ingress alone, leave it empty: every
+      name is accepted. An IPv6 address goes in brackets.
   default_language:
     name: Default language
     description: >-
