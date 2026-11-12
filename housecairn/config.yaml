@@ -4,7 +4,7 @@
 name: Housecairn
 # The HouseCairn image this app is built from (Dockerfile): a tag published
 # on ghcr.io/housecairn/housecairn. Change both together (D4).
-version: "0.2.0"
+version: "0.3.0"
 slug: housecairn
 description: >-
   Plan home maintenance and renovation work: what to do in the house, where,
