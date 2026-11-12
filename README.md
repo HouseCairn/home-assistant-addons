@@ -92,7 +92,7 @@ From [DOCS.md](housecairn/DOCS.md#limits), where each is explained:
 ## Project status
 
 **Experimental.** The app's version is the version of the Housecairn image it
-is built from (currently `0.1.0`, Housecairn's first release), a test version.
+is built from (currently `0.2.0`), a test version.
 Updates may change behaviour: read the [changelog](housecairn/CHANGELOG.md)
 and make a backup first.
 
