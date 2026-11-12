@@ -3,7 +3,37 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
-## 0.1.1 (unreleased)
+## 0.2.0
+
+Built from `ghcr.io/housecairn/housecairn:0.2.0`, the next release of
+Housecairn. Read its
+[release notes](https://github.com/HouseCairn/housecairn/releases/tag/v0.2.0)
+before updating, and make a backup that includes the app, as for every update.
+What it brings to the app, among the rest:
+
+- **Two defaults changed, both for safety.** Notification channels on a
+  private network, such as a ntfy or a Gotify on your local network, are
+  refused until an administrator allows them: if you use one, turn on
+  **Channels on the local network** in Housecairn, under **Instance
+  administration**, **Settings**, **Notifications**; its test says why it is
+  refused until then. Housecairn's own instance backup no longer holds the
+  secret key; a Home Assistant backup of the app still copies its whole data
+  folder, key included, and restores alone as before.
+- **The 400 page of a refused host name says what to do**: add the name. Through
+  ingress alone every name is accepted; on the published port, the name goes
+  in **Host names**, on the app's **Configuration** tab.
+- **The provider of a maintenance contract is a contractor of the home.** On
+  the first start after the update, Housecairn migrates its database once: each
+  provider written as a text becomes a contractor of the same home, created
+  when the home has none of that name. Nothing is lost, and the archive of a
+  home moves to format 3.
+- **A refused form says why, at the top**, with a summary linked to each field.
+- **Add a room, an item or a stock item from the task form**, and up to 50
+  material lines.
+- One date format per language, and a clear message for a comma in a number
+  in English.
+
+In the app itself:
 
 - **Host names is no longer needed through ingress.** At each start, the app
   asks the Supervisor whether its port is open on the host. While it is
