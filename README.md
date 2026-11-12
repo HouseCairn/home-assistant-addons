@@ -6,12 +6,16 @@ planner for home maintenance and renovation work, as a Home Assistant app
 
 [![Lint](https://github.com/HouseCairn/home-assistant-addons/actions/workflows/lint.yaml/badge.svg?branch=main)](https://github.com/HouseCairn/home-assistant-addons/actions/workflows/lint.yaml?query=branch%3Amain)
 [![Release](https://img.shields.io/github/v/release/HouseCairn/home-assistant-addons)](https://github.com/HouseCairn/home-assistant-addons/releases)
-![Project stage: experimental](https://img.shields.io/badge/project%20stage-experimental-yellow.svg)
+![status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)
 ![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green.svg)
 ![Supports amd64](https://img.shields.io/badge/amd64-yes-green.svg)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSE)
 
 [![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FHouseCairn%2Fhome-assistant-addons)
+
+> [!WARNING]
+> HouseCairn is alpha software. Expect bugs and breaking changes between versions.
+> Back up your data before every upgrade: a Home Assistant backup includes this app's data.
 
 <p align="center">
   <img src="docs/images/ingress-test-frame.png" width="720"
@@ -91,7 +95,7 @@ From [DOCS.md](housecairn/DOCS.md#limits), where each is explained:
 
 ## Project status
 
-**Experimental.** The app's version is the version of the Housecairn image it
+**Alpha.** The app's version is the version of the Housecairn image it
 is built from (currently `0.2.0`), a test version.
 Updates may change behaviour: read the [changelog](housecairn/CHANGELOG.md)
 and make a backup first.
