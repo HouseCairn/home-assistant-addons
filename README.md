@@ -96,7 +96,7 @@ From [DOCS.md](housecairn/DOCS.md#limits), where each is explained:
 ## Project status
 
 **Alpha.** The app's version is the version of the Housecairn image it
-is built from (currently `0.3.0`), a test version.
+is built from (currently `0.3.1`), a test version.
 Updates may change behaviour: read the [changelog](housecairn/CHANGELOG.md)
 and make a backup first.
 

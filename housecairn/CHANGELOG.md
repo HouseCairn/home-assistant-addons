@@ -3,6 +3,14 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## 0.3.1
+
+Built from `ghcr.io/housecairn/housecairn:0.3.1`, a release of Housecairn. Read
+its [release notes](https://github.com/HouseCairn/housecairn/releases/tag/v0.3.1).
+It only fixes the public demonstration instance of Housecairn, which the app
+does not expose: nothing changes for a Home Assistant user and there is no
+migration.
+
 ## 0.3.0
 
 Built from `ghcr.io/housecairn/housecairn:0.3.0`, a release of Housecairn. Read
