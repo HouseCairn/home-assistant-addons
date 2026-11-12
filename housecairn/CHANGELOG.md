@@ -3,6 +3,42 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## 0.3.0
+
+Built from `ghcr.io/housecairn/housecairn:0.3.0`, a release of Housecairn. Read
+its [release notes](https://github.com/HouseCairn/housecairn/releases/tag/v0.3.0)
+before updating, and make a backup that includes the app, as for every update.
+Housecairn is still alpha software. What it brings to the app, among the rest:
+
+- **Four database migrations run on the first start after the update.** All are
+  reversible and none changes existing data. Nothing to change in the app's
+  configuration.
+- **Planned cost of a task now counts the stock.** A stock item can have a unit
+  price, and the planned cost of a task adds the quantity of each stock item it
+  lists times its price. The figures of your budget may go up for tasks that
+  list priced stock items.
+- **Testing a notification channel and adding a link no longer hold the
+  screen.** Both are done by the background worker, which runs in the app: the
+  screen answers at once, then shows the result (reload the page if it does not
+  change by itself). The API answers `202` for the channel test instead of the
+  result.
+- **Restore the archive of a home as a copy**, next to the original, which is
+  not touched. Use it to duplicate a home or to check a backup.
+- **Notifications on the device (Web Push)**, off by default: an administrator
+  turns on **Notifications on the device** in Housecairn, under **Instance
+  administration**, **Settings**, **Notifications**. Not tested through
+  Home Assistant's ingress.
+- **Every reviewed Apprise service for notification channels** (137), a search
+  field with chips to choose several rooms or items, and an installable
+  application with Today and the task list readable offline.
+- **Fixes**: sign-up and the other emails no longer end in a server error when
+  the mail server fails; a refused restore leaves no file behind; tabs fit on a
+  320 px screen.
+
+The demonstration mode of Housecairn (`HOUSECAIRN_DEMO`) is not exposed by the
+app: it erases all data every night and is meant for a public demonstration
+instance only.
+
 ## 0.2.0
 
 Built from `ghcr.io/housecairn/housecairn:0.2.0`, the next release of
