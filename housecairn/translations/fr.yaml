@@ -30,6 +30,14 @@ configuration:
       flux de calendrier, des étiquettes QR et des e-mails sont construits
       dessus. Vide : modifiable dans Housecairn, et ces liens, faits depuis
       Home Assistant, ne fonctionnent pas en dehors.
+  trusted_origins:
+    name: Origines de confiance
+    description: >-
+      Seulement si chaque formulaire répond « Session expirée » (403) derrière
+      un reverse proxy placé devant Home Assistant : l'adresse de Home Assistant
+      dans le navigateur, schéma, nom et port seulement, comme
+      https://ha.example.com. Le journal la donne (« Origin checking failed »).
+      Pas de joker.
   oidc_server_url:
     name: Émetteur de l'authentification unique
     description: >-

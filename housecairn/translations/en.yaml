@@ -30,6 +30,13 @@ configuration:
       feeds, QR labels and emails are built on it. Empty: editable in
       Housecairn, and those links, when made through Home Assistant, do not
       work outside it.
+  trusted_origins:
+    name: Trusted origins
+    description: >-
+      Only if every form says "Session expired" (403) behind a reverse proxy in
+      front of Home Assistant: the address of Home Assistant in the browser,
+      scheme, name and port only, such as https://ha.example.com. The log
+      names it ("Origin checking failed"). No wildcard.
   oidc_server_url:
     name: Single sign-on issuer
     description: >-

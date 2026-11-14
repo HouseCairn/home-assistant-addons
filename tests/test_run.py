@@ -121,6 +121,48 @@ class EnvironmentTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(run.OptionError):
                 env_of({**HOSTS, "site_url": bad})
 
+    def test_trusted_origins(self) -> None:
+        # Exact origins, as a browser writes them in Origin: lower case, no
+        # default port, no trailing slash (D11).
+        for given, expected in (
+            (["https://ha.example.com"], "https://ha.example.com"),
+            ([" HTTPS://HA.Example.com/ "], "https://ha.example.com"),
+            (
+                ["https://ha.example.com:443", "http://192.0.2.10:80"],
+                "https://ha.example.com,http://192.0.2.10",
+            ),
+            (
+                ["https://ha.example.com:8443", "http://[2001:DB8::1]:8123"],
+                "https://ha.example.com:8443,http://[2001:db8::1]:8123",
+            ),
+        ):
+            with self.subTest(given=given):
+                env = env_of({**HOSTS, "trusted_origins": given})
+                self.assertEqual(env["CSRF_TRUSTED_ORIGINS"], expected)
+        self.assertNotIn("CSRF_TRUSTED_ORIGINS", env_of(HOSTS))
+        self.assertNotIn("CSRF_TRUSTED_ORIGINS", env_of({**HOSTS, "trusted_origins": []}))
+        for bad in (
+            ["*"],
+            ["https://*"],
+            ["https://*.example.com"],
+            ["ha.example.com"],
+            ["ftp://ha.example.com"],
+            ["https://ha.example.com/housecairn"],
+            ["https://ha.example.com/?a=1"],
+            ["https://ha.example.com/#top"],
+            ["https://user:pass@ha.example.com"],
+            ["https://ha.example.com:99999"],
+            ["https://ha.example.com:0"],
+            ["http://[not-an-address]"],
+            ["https://"],
+            ["https://a.example.com,https://b.example.com"],
+            ["https://ha.example.com\nDEBUG=true"],
+            [3],
+            "https://ha.example.com",
+        ):
+            with self.subTest(bad=bad), self.assertRaises(run.OptionError):
+                env_of({**HOSTS, "trusted_origins": bad})
+
     def test_oidc_all_or_nothing(self) -> None:
         env = env_of(
             {

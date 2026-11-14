@@ -79,6 +79,7 @@ needed.
 | `time_zone` | `TIME_ZONE` | the time zone of Home Assistant (`TZ`, set by the Supervisor) |
 | `signup_open` | `HOUSECAIRN_SIGNUP_OPEN` | closed, editable in the interface |
 | `site_url` | `HOUSECAIRN_SITE_URL` | the address of each request, editable in the interface; through ingress, links meant for outside do not work (D9) |
+| `trusted_origins` | `CSRF_TRUSTED_ORIGINS` | none: the origin of a form must be HouseCairn's own scheme and `Host` (D11) |
 | `oidc_server_url`, `oidc_client_id`, `oidc_client_secret`, `oidc_provider_name` | `OIDC_SERVER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_PROVIDER_NAME` | no provider from the options; providers can be declared in the interface |
 | `bootstrap_admin_email` | `HOUSECAIRN_BOOTSTRAP_ADMIN_EMAIL` | the first account through single sign-on becomes administrator |
 
@@ -212,10 +213,12 @@ How ingress and the port share one server:
   port published, the option lists every name used to reach Home Assistant,
   remote access included, and the address used for the port; without it,
   every name is accepted (D10).
-- **`CSRF_TRUSTED_ORIGINS`.** Not needed. The origin of a form is the browser's
+- **`CSRF_TRUSTED_ORIGINS`.** Not needed when Home Assistant receives the
+  browser's own `Host` and scheme. The origin of a form is the browser's
   scheme and `Host`; HouseCairn compares it with its own, whose scheme comes
   from the Supervisor's `X-Forwarded-Proto` through ingress, and is HTTP on the
-  port, where that header is ignored.
+  port, where that header is ignored. A reverse proxy in front of Home
+  Assistant can break that: D11.
 - **Cookies.** Through ingress, HouseCairn limits its cookies to the ingress
   path; on the port, they are at `/`. Browsers do not tell ports apart, so a
   cookie of the port is also sent to ingress addresses, after the ingress one,
@@ -350,3 +353,114 @@ Rejected:
   choose the host of the links HouseCairn builds.
 - **Keeping `homeassistant.local` as the default.** Harmless, but it reads as
   a restriction that does not apply through ingress alone.
+
+## D11. Trusted origins, for a reverse proxy in front of Home Assistant
+
+Issue #11 reports "Session expired" (403) on the first-account screen: a
+refusal of Django's CSRF check. The Ingress chain was read in the code
+(Home Assistant Core `homeassistant/components/hassio/ingress.py`, `dev` of
+2026-11-02; Supervisor `supervisor/api/ingress.py`, `main` of 2026-10-26).
+Core copies every request header but a few hop and encoding ones, `Host`,
+`Origin`, `Referer` and `Cookie` included, then sets `X-Ingress-Path`,
+`X-Forwarded-For`, and `X-Forwarded-Host` and `X-Forwarded-Proto` from the
+incoming headers of the same name, else from its own request (`request.host`,
+`request.scheme`). The Supervisor copies every header but its tokens and the
+`X-Remote-User-*` ones, which it sets itself, and appends its peer to
+`X-Forwarded-For`. HouseCairn reads `Host` (not `X-Forwarded-Host`) and,
+from `172.30.32.2` only, `X-Forwarded-Proto` (D9).
+
+A test chain of the same code (aiohttp, both `_init_header` copied, the app
+built from `0.3.1` with the environment of `run.py`) gave, for a GET then a
+POST of the first-account form sent with the page's own `Origin` (not what a
+browser sends there up to 0.3.1: D12):
+
+| Access | Result |
+| --- | --- |
+| Ingress, Home Assistant in HTTP | accepted |
+| Ingress, Home Assistant serving HTTPS itself | accepted |
+| Ingress, TLS proxy that passes `Host` and sets `X-Forwarded-Proto` | accepted |
+| Ingress, TLS proxy that replaces `Host` | refused, `Origin checking failed` |
+| Ingress, TLS proxy that does not set `X-Forwarded-Proto` | refused, `Origin checking failed` |
+| The port, and the port and ingress on the same host (shared cookies) | accepted |
+
+Home Assistant Cloud was not run: its tunnel (`snitun`) upgrades each
+connection with `loop.start_tls` and hands it to Core's server, so Core's
+`request.scheme` is `https`, the second row.
+
+The issue does not say how the reporter reaches Home Assistant: that these
+two rows are their case is not confirmed.
+
+Both refusals are the proxy's: Home Assistant can work without either header,
+and HouseCairn cannot tell the browser's address otherwise. Fix: an option,
+`trusted_origins`, turned into `CSRF_TRUSTED_ORIGINS`. Each entry is one exact
+origin, written as a browser writes `Origin` (scheme and name in lower case,
+no default port, no trailing slash): no path, no user, no wildcard, `*`
+refused, in the schema and in `run.py`. Django then accepts that origin as
+well as its own; the token of the form and the CSRF cookie are still checked.
+`DOCS.md` names the log line (`Origin checking failed - <origin> does not
+match any trusted origins.`) and the two ways out: fix the proxy, or the
+option.
+
+Rejected:
+
+- **`USE_X_FORWARDED_HOST`** from the Supervisor: Core fills
+  `X-Forwarded-Host` from the `Host` it received when the proxy sets none, so a
+  proxy that replaces `Host` without it gains nothing.
+- **Trusting every origin through ingress**, or exempting forms from the check:
+  it removes the protection.
+
+## D12. `Origin: null` through ingress: the page states its referrer policy
+
+**Cause, for every user up to 0.3.1.** Home Assistant Core gives every response
+of its HTTP server, the ingress ones included, `Referrer-Policy: no-referrer`:
+`setup_headers` (`homeassistant/components/http/headers.py`, lines 18 to 47,
+Core 2026.11.1) adds a middleware that calls
+`response.headers.update(added_headers)` on each response, which replaces
+HouseCairn's `same-origin` (the ingress proxy, `hassio/ingress.py`, copies the
+app's headers first). Under `no-referrer` the browser posts every form with
+`Origin: null` (Fetch standard, "append a request `Origin` header") and no
+`Referer`; Django refuses it: `Origin checking failed - null does not match
+any trusted origins.` The maintainer saw it with Chrome, also with Home
+Assistant reached directly on its own port, without any proxy.
+
+**Fix, in HouseCairn** (HouseCairn/housecairn#139, its ADR 0075): every page
+states `<meta name="referrer" content="same-origin">`, which the browser
+follows over the header; the forms then carry the page's real origin, and the
+CSRF check is unchanged. Nothing changes in this repository but the image: the
+app takes the fix with the first HouseCairn image that contains it (D4), and
+that update closes issue #11.
+
+Test chain, Chromium 156 headless in front of aiohttp copies of Core 2026.11.1
+(headers middleware and ingress proxy) and of the Supervisor 2026.11.0, then
+HouseCairn under gunicorn with the environment of `run.py` (the Supervisor's
+address replaced by `127.0.0.2`): with 0.3.1, the form is refused over HTTP and
+HTTPS; with #139, it is accepted (302) over both, and a form posted from
+another site under `no-referrer` is still refused.
+
+**The peer `172.30.32.1` of the log.** The access log shows the client address
+after HouseCairn has resolved it, not the TCP peer: gunicorn writes
+`REMOTE_ADDR` of the request's environment once the response is sent
+(`'h'` in `gunicorn/glogging.py`, 26.2.0), and HouseCairn's first middleware
+has replaced it there with the client of `X-Forwarded-For` (its ADR 0012). The
+request comes from the Supervisor (`172.30.32.2`, trusted), which appends its
+own peer, Home Assistant Core, to `X-Forwarded-For`. Core runs on the host's
+network and reaches the Supervisor from the gateway of the `hassio` network,
+`172.30.32.1` (`DOCKER_IPV4_NETWORK_MASK[1]`, `supervisor/docker/network.py`;
+the Supervisor gives Core that address, `supervisor/docker/homeassistant.py`
+line 94, 2026.11.0), which is not trusted, so HouseCairn takes it as the
+client (D9, sign-in rate limits). Same in the test chain: the log shows the
+address of the Core copy, not the Supervisor's. `X-Forwarded-Proto` and
+`X-Ingress-Path` are read from the Supervisor, the TCP peer: the scheme of the expected origin is right, and the
+prefix appears in the path of the refusal.
+
+Rejected:
+
+- **Accepting `Origin: null` with `Sec-Fetch-Site: same-origin`**, in a
+  gunicorn `pre_request` hook loaded by the app. It works over HTTPS (tested:
+  302), but browsers send `Sec-Fetch-*` only to a potentially trustworthy URL
+  (Fetch Metadata, "append the Fetch metadata headers for a request", step 1):
+  over plain HTTP, the usual way to reach Home Assistant at home, Chromium sent
+  `Origin: null` and no `Sec-Fetch-Site`, and the form was still refused. It
+  also loosens the check for what the page can fix itself.
+- **Treating `Origin: null` as no origin**: over HTTP, Django then checks the
+  token alone, for a forged form as for a real one.

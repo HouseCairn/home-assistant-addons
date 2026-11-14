@@ -42,6 +42,7 @@ change it here.
 | Time zone (`time_zone`) | Such as `Europe/Paris`: it decides what "today" is. Empty: the time zone of Home Assistant. |
 | Open sign-up (`signup_open`) | Lets anyone create an account from the sign-up page. Leave it off: it needs outgoing email and HTTPS (see [Limits](#limits)). Housecairn does not start with open sign-up and no outgoing email server configured, and the email settings are in its administration screens, which need a first administrator: leave it off at first. |
 | Public address (`site_url`) | The address that reaches Housecairn without Home Assistant, such as [the port](#the-port) (`http://192.0.2.10:8000`), without a path. The links of invitations, calendar feeds, QR labels and emails are built on it: see [Links meant for outside](#links-meant-for-outside-home-assistant). |
+| Trusted origins (`trusted_origins`) | **Only behind a reverse proxy in front of Home Assistant**, when every form answers **Session expired** (403): see [Session expired on every form](#session-expired-on-every-form). The address of Home Assistant as the browser shows it, scheme, name and port only, such as `https://ha.example.com`, one per line. No path, no wildcard; `*` is refused. |
 | Single sign-on (`oidc_server_url`, `oidc_client_id`, `oidc_client_secret`, `oidc_provider_name`) | An OpenID Connect provider for sign-in. `oidc_server_url` is the issuer, an `https://` address; the client identifier is then required. See [Single sign-on](https://docs.housecairn.app/administration/oidc/). |
 | First administrator (`bootstrap_admin_email`) | With single sign-on: only the person with this address, verified by the provider, can become the first administrator. |
 
@@ -71,6 +72,42 @@ HTTPS), from Home Assistant's Supervisor only.
 - **Shown in a frame of Home Assistant.** Housecairn lets a page of the same
   address (scheme, name and port) show it in a frame, as Home Assistant does,
   and no other site.
+
+### Session expired on every form
+
+**`null does not match`: everyone, up to version 0.3.1.** If the line of the
+**Log** tab reads `Origin checking failed - null does not match any trusted
+origins.`, this is not your setup: Home Assistant gives its pages
+`Referrer-Policy: no-referrer`, and the browser then sends forms with
+`Origin: null`. Fixed in Housecairn itself (D12 of this repository), in the
+version of the app that follows 0.3.1; **Trusted origins** does not help with
+it.
+
+**An address that does not match.** Housecairn accepts a form only from a
+page of its own address: it compares the browser's `Origin` with the scheme
+and name it receives. Home Assistant and
+its Supervisor pass both on unchanged, whether Home Assistant is reached in
+HTTP, in HTTPS, or through Home Assistant Cloud. A reverse proxy in front of
+Home Assistant (nginx, a tunnel...) can break that match in two ways:
+
+- it replaces the `Host` header with the address of Home Assistant on your
+  network;
+- it terminates HTTPS without setting `X-Forwarded-Proto: https`.
+
+Home Assistant can work without either; Housecairn then answers
+**Session expired** (403) to every form, the first-account screen included,
+and the **Log** tab shows a line such as:
+
+```text
+Forbidden (Origin checking failed - https://ha.example.com does not match any trusted origins.): /api/hassio_ingress/<token>/setup/
+```
+
+Either make the proxy pass the `Host` header the browser sent and set
+`X-Forwarded-Proto` (with nginx: `proxy_set_header Host $host;` and
+`proxy_set_header X-Forwarded-Proto $scheme;`), or put the address of that
+line, `https://ha.example.com`, in **Trusted origins** on the
+**Configuration** tab and restart the app. The form still needs its token and
+cookie: this only tells Housecairn which address the browser uses.
 
 ### Links meant for outside Home Assistant
 
