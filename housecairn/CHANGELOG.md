@@ -5,6 +5,13 @@ the Housecairn image it is built from.
 
 ## Unreleased
 
+- **Forms through ingress, for everyone** (issue #11). Home Assistant gives every
+  ingress page `Referrer-Policy: no-referrer`; the browser then sent forms with
+  `Origin: null` and Housecairn answered **Session expired** (403) to all of
+  them, the first-account screen first (log: `Origin checking failed - null
+  does not match any trusted origins.`). Fixed in Housecairn
+  (HouseCairn/housecairn#139): this entry ships with the first Housecairn image
+  that contains it.
 - **Trusted origins, for a reverse proxy in front of Home Assistant.** A proxy
   that replaces the `Host` header, or terminates HTTPS without setting
   `X-Forwarded-Proto`, made Housecairn answer **Session expired** (403) to

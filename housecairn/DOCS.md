@@ -75,8 +75,17 @@ HTTPS), from Home Assistant's Supervisor only.
 
 ### Session expired on every form
 
-Housecairn accepts a form only from a page of its own address: it compares
-the browser's `Origin` with the scheme and name it receives. Home Assistant and
+**`null does not match`: everyone, up to version 0.3.1.** If the line of the
+**Log** tab reads `Origin checking failed - null does not match any trusted
+origins.`, this is not your setup: Home Assistant gives its pages
+`Referrer-Policy: no-referrer`, and the browser then sends forms with
+`Origin: null`. Fixed in Housecairn itself (D12 of this repository), in the
+version of the app that follows 0.3.1; **Trusted origins** does not help with
+it.
+
+**An address that does not match.** Housecairn accepts a form only from a
+page of its own address: it compares the browser's `Origin` with the scheme
+and name it receives. Home Assistant and
 its Supervisor pass both on unchanged, whether Home Assistant is reached in
 HTTP, in HTTPS, or through Home Assistant Cloud. A reverse proxy in front of
 Home Assistant (nginx, a tunnel...) can break that match in two ways:
