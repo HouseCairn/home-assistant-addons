@@ -3,6 +3,18 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## Unreleased
+
+- **Trusted origins, for a reverse proxy in front of Home Assistant.** A proxy
+  that replaces the `Host` header, or terminates HTTPS without setting
+  `X-Forwarded-Proto`, made Housecairn answer **Session expired** (403) to
+  every form through ingress, the first-account screen included; the log shows
+  `Origin checking failed - <address> does not match any trusted origins.`
+  Fix the proxy, or put that address, such as `https://ha.example.com`, in the
+  new **Trusted origins** option. Nothing changes without a proxy, through
+  Home Assistant Cloud or on the port. See "Session expired on every form" in
+  the documentation.
+
 ## 0.3.1
 
 Built from `ghcr.io/housecairn/housecairn:0.3.1`, a release of Housecairn. Read
