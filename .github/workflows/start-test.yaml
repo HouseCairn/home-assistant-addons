@@ -43,7 +43,7 @@ jobs:
           fi
           changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
           echo "$changed"
-          if echo "$changed" | grep -qE '^(housecairn/|tests/start/|\.github/workflows/start-test\.yaml$)'; then
+          if grep -qE '^(housecairn/|tests/start/|\.github/workflows/start-test\.yaml$)' <<<"$changed"; then
             echo "run=true" >>"$GITHUB_OUTPUT"
           else
             echo "run=false" >>"$GITHUB_OUTPUT"

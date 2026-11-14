@@ -119,7 +119,9 @@ os.chmod("/data/options.json", 0o600)
     esac
   done
   [ "$status" = "running healthy" ] || fail "$case: the app is not healthy after 180 s ($status)"
-  docker logs "$APP" 2>&1 | grep -q "applying database migrations" || fail "$case: no migration in the log"
+  local log
+  log=$(docker logs "$APP" 2>&1)
+  grep -q "applying database migrations" <<<"$log" || fail "$case: no migration in the log"
   pass "$case: the app started, migrations applied, healthy"
 }
 
