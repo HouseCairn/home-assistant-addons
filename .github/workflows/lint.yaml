@@ -1,8 +1,9 @@
 # Checks of every pull request and of main: yamllint on the whole repository,
 # the app linter that the Home Assistant example repository uses
-# (https://github.com/home-assistant/apps-example), and the tests of the start
-# script of the app. Actions are pinned by full commit SHA, with their tag in
-# the comment; Dependabot updates both.
+# (https://github.com/home-assistant/apps-example), the tests of the start
+# script of the app, and a dry run of the App update workflow (D13). Actions
+# are pinned by full commit SHA, with their tag in the comment; Dependabot
+# updates both.
 name: Lint
 
 on:
@@ -65,3 +66,21 @@ jobs:
       # tests that drop root for real and the ownership changes.
       - name: Unit tests as root
         run: sudo python3 -m unittest discover -s tests -v
+
+  app-update-dry-run:
+    name: App update (dry run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The steps of app-update.yaml against the real release, registry and
+      # attestations, on the app as it is and moved back to an older version;
+      # nothing is pushed or opened.
+      - name: Check, resolve, verify and apply
+        env:
+          # Any token: the attestations of a public repository are public.
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/app-update-dry-run.sh

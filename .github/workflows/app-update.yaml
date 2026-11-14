@@ -1,0 +1,198 @@
+# A pull request that moves the app to the latest Housecairn release (D13).
+#
+# Every day, and on demand: compare the latest published release of
+# HouseCairn/housecairn (public API) with the tag in housecairn/Dockerfile. When
+# it is newer, resolve the digest of its multi-architecture index on ghcr.io,
+# verify the signed build provenance of that digest (the same identity as the
+# main repository's docs/security/verify-image.md), then open, or update, the
+# one pull request of the branch app-update/housecairn, which changes the
+# Dockerfile, `version` in config.yaml and the changelog together (D4).
+#
+# The pull request is opened with a token of the project's GitHub App, so that
+# its own checks run (a pull request opened with GITHUB_TOKEN starts no
+# workflow). The App's key is a secret of the `app-update` environment, limited
+# to the main branch: no pull_request event, and no fork, can read it. Without
+# the App, the run stops red with what to set up, after the checks.
+name: App update
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  BRANCH: app-update/housecairn
+
+jobs:
+  check:
+    name: Check for a new Housecairn release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the repository
+    outputs:
+      newer: ${{ steps.check.outputs.newer }}
+      latest: ${{ steps.check.outputs.latest }}
+      release_url: ${{ steps.check.outputs.release_url }}
+      digest: ${{ steps.resolve.outputs.digest }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare the latest release with the Dockerfile
+        id: check
+        run: python3 .github/scripts/app_update.py check
+      - name: Resolve the digest of the multi-architecture image
+        id: resolve
+        if: steps.check.outputs.newer == 'true'
+        env:
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: |
+          digest=$(python3 .github/scripts/app_update.py resolve "$LATEST")
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - name: Verify the signed build provenance of that digest
+        if: steps.check.outputs.newer == 'true'
+        env:
+          # Any token: the attestations of a public repository are public.
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: python3 .github/scripts/app_update.py verify "$LATEST" "$DIGEST"
+      - name: Summary
+        env:
+          CURRENT: ${{ steps.check.outputs.current }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          NEWER: ${{ steps.check.outputs.newer }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          if [ "$NEWER" = true ]; then
+            line="Housecairn $LATEST is out (the app is on $CURRENT):"
+            line="$line ghcr.io/housecairn/housecairn:$LATEST@$DIGEST, provenance verified."
+          else
+            line="The app is on Housecairn $CURRENT, the latest release ($LATEST): nothing to do."
+          fi
+          echo "$line" >>"$GITHUB_STEP_SUMMARY"
+
+  pull-request:
+    name: Open or update the pull request
+    needs: check
+    if: needs.check.outputs.newer == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Holds the App's key; its deployment rule limits it to main.
+    environment: app-update
+    permissions: {}
+    steps:
+      - name: Require the project's GitHub App
+        env:
+          CLIENT_ID: ${{ vars.APP_UPDATE_CLIENT_ID }}
+        run: |
+          if [ -z "$CLIENT_ID" ]; then
+            echo "::error::A new Housecairn release is out, but the app-update environment has no" \
+              "APP_UPDATE_CLIENT_ID variable and APP_UPDATE_PRIVATE_KEY secret (docs/decisions.md, D13):" \
+              "update the app by hand, or set up the App."
+            exit 1
+          fi
+      - name: Token of the App, for this repository only
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.APP_UPDATE_CLIENT_ID }}
+          private-key: ${{ secrets.APP_UPDATE_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Change the Dockerfile, config.yaml and the changelog
+        id: change
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
+          LATEST: ${{ needs.check.outputs.latest }}
+          DIGEST: ${{ needs.check.outputs.digest }}
+          RELEASE_URL: ${{ needs.check.outputs.release_url }}
+        run: |
+          set -euo pipefail
+          bot="${APP_SLUG}[bot]"
+          bot_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          email="${bot_id}+${bot}@users.noreply.github.com"
+          # One branch, one pull request: when the branch exists, it is replaced
+          # only for a newer version, and only if every commit on it is the App's.
+          if git fetch --quiet origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null; then
+            on_branch=$(git show "origin/$BRANCH:housecairn/config.yaml" | sed -n 's/^version: "\(.*\)"$/\1/p')
+            if [ "$on_branch" = "$LATEST" ]; then
+              echo "The branch $BRANCH is already on $LATEST."
+              echo "push=false" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            others=$(git log --format=%ae "origin/main..origin/$BRANCH" | grep -vxF "$email" || true)
+            if [ -n "$others" ]; then
+              echo "::error::$BRANCH has commits that are not the App's: update it by hand to $LATEST."
+              exit 1
+            fi
+          fi
+          python3 .github/scripts/app_update.py apply "$LATEST" "$DIGEST" "$RELEASE_URL"
+          git config user.name "$bot"
+          git config user.email "$email"
+          git switch -C "$BRANCH"
+          git commit --quiet --signoff -m "feat(housecairn): HouseCairn $LATEST, pinned by digest" \
+            -- housecairn/Dockerfile housecairn/config.yaml housecairn/CHANGELOG.md
+          git show --stat HEAD
+          echo "push=true" >>"$GITHUB_OUTPUT"
+      - name: Push the branch and open or update the pull request
+        if: steps.change.outputs.push == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          LATEST: ${{ needs.check.outputs.latest }}
+          DIGEST: ${{ needs.check.outputs.digest }}
+          RELEASE_URL: ${{ needs.check.outputs.release_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.git"
+          git push --quiet --force "$remote" "HEAD:refs/heads/$BRANCH"
+          body=$(mktemp)
+          cat >"$body" <<EOF
+          Housecairn $LATEST is out: this moves the app to it, as the app's version is the
+          tag of the Housecairn image (D4).
+
+          - \`housecairn/Dockerfile\`: \`ghcr.io/housecairn/housecairn:$LATEST@$DIGEST\`, the
+            multi-architecture index (linux/amd64, linux/arm64), whose signed build
+            provenance was verified: built by HouseCairn/housecairn's image workflow
+            from \`refs/tags/v$LATEST\`, on a GitHub-hosted runner ([run]($RUN_URL)).
+          - \`housecairn/config.yaml\`: \`version: "$LATEST"\`.
+          - \`housecairn/CHANGELOG.md\`: an entry that points to the
+            [release notes]($RELEASE_URL).
+
+          Before merging:
+
+          - [ ] Read the release notes, and the "Home Assistant impact" of the pull
+                requests they list: an option, a variable or a behaviour behind
+                Ingress that the app needs goes into this pull request
+                (\`config.yaml\`, \`run.py\`, \`DOCS.md\`, translations).
+          - [ ] Complete the changelog entry with what the release brings to the app.
+          - [ ] The checks pass, the start test included.
+
+          Opened by the App update workflow.
+          EOF
+          title="feat(housecairn): HouseCairn $LATEST, pinned by digest"
+          number=$(gh pr list --repo "$REPOSITORY" --head "$BRANCH" --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --repo "$REPOSITORY" --title "$title" --body-file "$body"
+            echo "Updated pull request #$number." >>"$GITHUB_STEP_SUMMARY"
+          else
+            gh pr create --repo "$REPOSITORY" --base main --head "$BRANCH" --title "$title" --body-file "$body"
+            echo "Opened a pull request for Housecairn $LATEST." >>"$GITHUB_STEP_SUMMARY"
+          fi

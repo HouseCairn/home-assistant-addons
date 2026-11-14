@@ -19,5 +19,6 @@ updates:
     open-pull-requests-limit: 5
 
 # The base image of the app (housecairn/Dockerfile) is HouseCairn's own image:
-# it follows the main repository by hand, together with `version` in
-# config.yaml and the changelog, so it has no Dependabot entry.
+# it follows the releases of the main repository, together with `version` in
+# config.yaml and the changelog, through the App update workflow
+# (app-update.yaml, docs/decisions.md D13), so it has no Dependabot entry.

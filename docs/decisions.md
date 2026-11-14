@@ -350,3 +350,68 @@ Rejected:
   choose the host of the links HouseCairn builds.
 - **Keeping `homeassistant.local` as the default.** Harmless, but it reads as
   a restriction that does not apply through ingress alone.
+
+## D13. A pull request for each Housecairn release
+
+The app is a layer over HouseCairn's image (D2), and its version is the tag of
+that image (D4). Dependabot does not follow the image: it would change the
+Dockerfile alone, without `version` in `config.yaml` and the changelog. The
+workflow `.github/workflows/app-update.yaml` does it instead, every day and
+on demand:
+
+1. it compares the latest published release of HouseCairn (the public
+   `releases/latest` API, which returns no draft nor pre-release) with the tag
+   in the Dockerfile, as version numbers;
+2. when the release is newer, it reads the digest of the tag's
+   multi-architecture index on ghcr.io (anonymous pull), checks that it is the
+   SHA-256 of the index the registry sent and that the index holds
+   `linux/amd64` and `linux/arm64`;
+3. it verifies the signed build provenance of that digest with
+   `gh attestation verify` (Sigstore): built by HouseCairn's `image.yml`
+   workflow, from the tag `refs/tags/vX.Y.Z`, on a GitHub-hosted runner, the
+   identity that HouseCairn's `docs/security/verify-image.md` documents.
+   HouseCairn signs its image with GitHub's artifact attestations, not with a
+   separate `cosign sign`: the provenance is the signature to check;
+4. it changes the Dockerfile (tag and digest), `version` and the changelog in
+   one commit (an entry that points to the release notes; entries under
+   "Unreleased" move under the new version), and opens the pull request of
+   the branch `app-update/housecairn`, or updates it when a newer release
+   comes out before it is merged. There is never more than one.
+
+The pull request says what to check before merging: the release notes and
+the "Home Assistant impact" of HouseCairn's pull requests, for an option, a
+variable or a behaviour behind Ingress that the app must follow
+(`config.yaml`, `run.py`). The start test (D14) runs on it.
+
+**Who opens the pull request: the project's GitHub App.** A pull request
+opened with the workflow's `GITHUB_TOKEN` starts no workflow, so its checks
+would never run and the rules of `main` would block it. A token of a GitHub
+App does start them. The App is installed on this repository only, with
+**Contents** and **Pull requests** in read and write and nothing else; the
+workflow asks for a token limited to those two and to this repository, valid
+for an hour. Its client ID and private key are a variable and a secret of the
+`app-update` environment, whose deployment rule allows `main` only: the
+workflow runs on `schedule` and `workflow_dispatch` alone, never on a
+`pull_request`, so no fork and no pull request can read the key. Until the App
+is set up, a run that finds a release stops in red with what to do, after the
+checks.
+
+Rejected:
+
+- **`GITHUB_TOKEN` and "Allow GitHub Actions to create and approve pull
+  requests"**: the pull request would have no checks, and the setting also
+  lets every workflow of the repository approve pull requests.
+- **A personal access token**: tied to a person and to everything that person
+  can reach, long-lived, and the pull request would be the maintainer's own,
+  which the maintainer cannot approve.
+- **A deploy key**, to push the branch so that the push starts the checks: it
+  writes to the whole repository and needs the pull request opened by another
+  token anyway.
+
+The branch is only replaced for a newer release, and only while every commit
+on it is the App's: changes made by hand on it (an option the release needs)
+are never overwritten; the run then stops and asks for the update by hand.
+`lint.yaml` runs the same steps on every pull request, without pushing
+anything (**App update (dry run)**): the app against the latest release, then
+a copy moved back to 0.3.0, which must be found out of date, resolved,
+verified and changed.
