@@ -415,3 +415,48 @@ are never overwritten; the run then stops and asks for the update by hand.
 anything (**App update (dry run)**): the app against the latest release, then
 a copy moved back to 0.3.0, which must be found out of date, resolved,
 verified and changed.
+
+## D14. A start test on every pull request
+
+The unit tests of `run.py` check the environment it computes, not that
+HouseCairn starts with it, nor what a browser meets through Ingress. Issue #11
+showed the gap: Home Assistant Core's `http` component sets
+`Referrer-Policy: no-referrer` on every response, the ones it relays from an
+app through Ingress included (`homeassistant/components/http/headers.py`,
+which replaces the app's own policy); under that policy a browser sends the
+form's POST with `Origin: null`, and HouseCairn refused the creation of the
+first administrator.
+
+The workflow `.github/workflows/start-test.yaml` (job **Start test (amd64)**)
+builds the app for `linux/amd64` on every pull request that changes
+`housecairn/` (the App update's, D13, included), and runs
+`tests/start/start-test.sh`:
+
+- the app is started as the Supervisor starts it: as root, `/data` with
+  `options.json` in mode 600, the `environment` of `config.yaml`,
+  `SUPERVISOR_TOKEN`, an init, `/tmp` in memory, on a network shaped like the
+  Supervisor's (`172.30.32.0/23`, the Supervisor at `.2`, the app in
+  `172.30.33.0/24`), with a stand-in Supervisor that answers
+  `/addons/self/info` (D10);
+- `tests/start/ingress.py` relays Ingress with the header handling of Core
+  and of the Supervisor copied from their code, and Core's response headers,
+  `Referrer-Policy: no-referrer` first;
+- `tests/start/first_admin.py` does what a browser does on the first-account
+  page: GET, then POST of the form with the cookies of the page, `Origin` and
+  `Referer` as the Fetch standard sets them under the page's referrer policy,
+  and `Sec-Fetch-*`; the administrator must be created (302 to the instance's
+  overview, which then opens signed in), and the same POST marked as coming
+  from another site must be refused;
+- three ways in, each from an empty `/data` so the migrations run each time:
+  Ingress relayed from the Supervisor's address (`172.30.32.2`), Ingress
+  relayed from the network's gateway (`172.30.32.1`, where Core, on the host
+  network, comes from), and the published port;
+- it fails when the app does not become healthy, when a migration fails or
+  when the form is refused. A negative control runs the same test on the app
+  with a migration broken on purpose (`tests/start/broken.Dockerfile`), which
+  must fail.
+
+The job runs on every pull request and only skips its steps when nothing the
+app is built from changed, so that it can be a required check of `main`.
+`arm64` is not started: the image is the same multi-architecture index, and
+the runner would need emulation.
