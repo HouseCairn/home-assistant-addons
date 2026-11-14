@@ -7,18 +7,23 @@ GET <base>/setup/, keep its cookies, then POST the form as a browser does from
 that page (WHATWG Fetch, "append a request `Origin` header" and "determine
 request's referrer"):
 
-- under the `Referrer-Policy` of the response: `no-referrer` (what Home
-  Assistant's Ingress sets, D14) sends `Origin: null` and no Referer; any
-  other policy, for this same-origin POST, sends the page's origin, and the
-  page's address as Referer;
+- under the page's effective referrer policy, as a browser computes it: the
+  `Referrer-Policy` header of the response, replaced by the last valid
+  `<meta name="referrer">` of the document (HTML Standard, the meta element's
+  `name` attribute, referrer state). `no-referrer` (what Home Assistant's
+  Ingress sets on the header, D14, and what a page without the meta keeps)
+  sends `Origin: null` and no Referer; any other policy, for this same-origin
+  POST, sends the page's origin, and the page's address as Referer;
 - `Sec-Fetch-Site: same-origin`, `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest`
   `iframe` with --frame (Home Assistant shows the app in a frame), else
   `document`.
 
-With --expect-policy, the page must come with exactly that `Referrer-Policy`,
-else the run fails before any POST: the browser's behaviour is chosen from the
-header, so a stand-in that lost it would test another case and pass on an app
-that has the bug of issue #11.
+With --expect-policy, the page must come with exactly that `Referrer-Policy`
+header, else the run fails before any POST: the stand-in models Core, so one
+that lost the header would test another case. The header is not the whole
+story: the meta of the page may replace it, and the POST follows the effective
+policy, so an app without the fix of issue #11 (a page with no meta) still
+sends `Origin: null` here and is refused. The report has both policies.
 
 First, the same POST as if another site sent it (`Sec-Fetch-Site: cross-site`,
 with `Origin` that site's, then `null` as from a page in `no-referrer`), with
@@ -34,10 +39,72 @@ import http.client
 import json
 import re
 import sys
+from html.parser import HTMLParser
 from http.cookies import SimpleCookie
 from urllib.parse import urlencode, urlsplit
 
 PASSWORD = "correct horse battery staple 9"  # noqa: S105 (a test instance)
+
+
+# The values of the Referrer Policy standard; a meta with any other value is ignored.
+REFERRER_POLICIES = frozenset(
+    {
+        "no-referrer",
+        "no-referrer-when-downgrade",
+        "same-origin",
+        "origin",
+        "strict-origin",
+        "origin-when-cross-origin",
+        "strict-origin-when-cross-origin",
+        "unsafe-url",
+    }
+)
+
+
+class _MetaReferrer(HTMLParser):
+    """The `content` of every `<meta name="referrer">`, in document order."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.values: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "meta":
+            return
+        found = {name: value or "" for name, value in attrs}
+        if found.get("name", "").strip().lower() == "referrer" and "content" in found:
+            self.values.append(found["content"])
+
+
+def meta_referrer_policy(body: str) -> str:
+    """The policy the last valid `<meta name="referrer">` sets, or "" (none, or none valid).
+
+    The element's content is compared ASCII case-insensitively, after stripping whitespace;
+    a value that is not a referrer policy leaves the policy as it was.
+    """
+    parser = _MetaReferrer()
+    parser.feed(body)
+    policy = ""
+    for value in parser.values:
+        value = value.strip().lower()
+        if value in REFERRER_POLICIES:
+            policy = value
+    return policy
+
+
+def effective_policy(header: str, body: str) -> str:
+    """What a browser applies to the document: the header's policy, replaced by the meta's."""
+    return meta_referrer_policy(body) or header
+
+
+def request_origin(policy: str, origin: str) -> str:
+    """The `Origin` of a same-origin POST over HTTP (Fetch, "append a request `Origin` header").
+
+    The request is neither GET nor HEAD and its mode is not cors (a form navigation), so the
+    policy decides: `no-referrer` gives the opaque origin; `same-origin` and the others, for a
+    request to the same origin and without an HTTPS-to-HTTP downgrade, give the origin.
+    """
+    return "null" if policy == "no-referrer" else origin
 
 
 class Jar:
@@ -115,7 +182,7 @@ def main() -> int:
     parser.add_argument("--host", required=True, help="the host (and port) in the browser's address bar")
     parser.add_argument("--base", default="", help="the Ingress path, or empty on the port")
     parser.add_argument("--code", required=True, help="the first-account code of the app's log")
-    parser.add_argument("--expect-policy", help="fail unless the page's Referrer-Policy is exactly this")
+    parser.add_argument("--expect-policy", help="fail unless the Referrer-Policy header of the page is exactly this")
     parser.add_argument("--frame", action="store_true", help="the page is in Home Assistant's frame")
     args = parser.parse_args()
     browser = Browser(args.connect, args.host, args.frame)
@@ -126,7 +193,8 @@ def main() -> int:
         "GET", page, {"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": browser.dest}
     )
     policy = last(headers, "Referrer-Policy").split(",")[-1].strip().lower()
-    report["get"] = {"status": status, "referrer_policy": policy}
+    effective = effective_policy(policy, body.decode("utf-8", "replace"))
+    report["get"] = {"status": status, "referrer_policy": policy, "effective_referrer_policy": effective}
     if args.expect_policy is not None:
         report["get"]["expected_referrer_policy"] = args.expect_policy.lower()  # type: ignore[index]
     if args.expect_policy is not None and policy != args.expect_policy.lower():
@@ -154,10 +222,9 @@ def main() -> int:
             "password2": PASSWORD,
         }
     ).encode()
-    if policy == "no-referrer":
-        origin: dict[str, str] = {"Origin": "null"}
-    else:
-        origin = {"Origin": browser.origin, "Referer": browser.origin + page}
+    origin = {"Origin": request_origin(effective, browser.origin)}
+    if effective != "no-referrer":
+        origin["Referer"] = browser.origin + page
     form = {
         **origin,
         "Content-Type": "application/x-www-form-urlencoded",

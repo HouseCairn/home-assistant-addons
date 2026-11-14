@@ -574,9 +574,13 @@ builds the app for `linux/amd64` on every pull request that changes
   `Referrer-Policy: no-referrer` first;
 - `tests/start/first_admin.py` does what a browser does on the first-account
   page: GET, then POST of the form with the cookies of the page, `Origin` and
-  `Referer` as the Fetch standard sets them under the page's referrer policy,
-  and `Sec-Fetch-*`; the administrator must be created (302 to the instance's
-  overview, which then opens signed in), and the same POST sent by another
+  `Referer` as the Fetch standard sets them under the page's effective referrer
+  policy (the `Referrer-Policy` header, replaced by the last valid
+  `<meta name="referrer">` of the page, as the HTML Standard says; the header
+  stays Core's `no-referrer`, so an image without the meta, such as 0.3.1,
+  still sends `Origin: null` and fails), and `Sec-Fetch-*`; the administrator
+  must be created (302 to the instance's overview, which then opens signed
+  in), and the same POST sent by another
   site (`Sec-Fetch-Site: cross-site`, its own origin or `null`), with the
   page's cookie and token, must be refused;
 - two ways in, each from an empty `/data` so the migrations run each time:

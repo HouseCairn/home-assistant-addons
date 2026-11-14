@@ -14,8 +14,9 @@
 #
 # Ingress is tests/start/ingress.py: Home Assistant's header handling, and
 # Core's `Referrer-Policy: no-referrer` on every response, which the Ingress
-# case requires of the page (--expect-policy), else it would not be testing
-# the browser behaviour of issue #11. Each case starts
+# case requires of the page's header (--expect-policy), else it would not be
+# testing the browser behaviour of issue #11; the browser then applies the
+# page's <meta name="referrer"> over that header, as a real one does. Each case starts
 # from an empty /data, so the migrations run each time. It fails when the app
 # does not become healthy, when a migration fails, or when the form is refused.
 set -euo pipefail
