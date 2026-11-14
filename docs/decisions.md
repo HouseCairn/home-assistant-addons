@@ -575,8 +575,10 @@ builds the app for `linux/amd64` on every pull request that changes
 - `tests/start/first_admin.py` does what a browser does on the first-account
   page: GET, then POST of the form with the cookies of the page, `Origin` and
   `Referer` as the Fetch standard sets them under the page's effective referrer
-  policy (the `Referrer-Policy` header, replaced by the last valid
-  `<meta name="referrer">` of the page, as the HTML Standard says; the header
+  policy (the `Referrer-Policy` header, read by its last valid token, replaced
+  by the last valid `<meta name="referrer">` of the page, as the HTML Standard
+  says: `content` lowercased and not trimmed, legacy values mapped, a meta in a
+  `<template>` ignored; the header
   stays Core's `no-referrer`, so an image without the meta, such as 0.3.1,
   still sends `Origin: null` and fails), and `Sec-Fetch-*`; the administrator
   must be created (302 to the instance's overview, which then opens signed

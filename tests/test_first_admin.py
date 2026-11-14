@@ -44,6 +44,7 @@ class PermissiveApp(BaseHTTPRequestHandler):
     policy: str | None = None  # the Referrer-Policy the app itself sends, if any
     head = ""  # markup for the page's <head>, such as a <meta name="referrer">
     refuse_null = False  # behave as the app of issue #11: 403 for `Origin: null`
+    accept_cross_site = False  # an app that no longer refuses the POST of another site
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         pass
@@ -75,7 +76,7 @@ class PermissiveApp(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        if self.headers.get("Sec-Fetch-Site") == "cross-site" or (
+        if (self.headers.get("Sec-Fetch-Site") == "cross-site" and not self.accept_cross_site) or (
             self.refuse_null and self.headers.get("Origin") == "null"
         ):
             self.reply(403)
@@ -103,7 +104,7 @@ class FirstAdminTests(unittest.TestCase):
         old = os.environ.get("APP_URL")
         os.environ["APP_URL"] = f"http://127.0.0.1:{self.app.server_port}"
         self.addCleanup(lambda: os.environ.__setitem__("APP_URL", old) if old else os.environ.pop("APP_URL", None))
-        for name, default in (("policy", None), ("head", ""), ("refuse_null", False)):
+        for name, default in (("policy", None), ("head", ""), ("refuse_null", False), ("accept_cross_site", False)):
             setattr(PermissiveApp, name, default)
             self.addCleanup(setattr, PermissiveApp, name, default)
 
@@ -187,6 +188,21 @@ class FirstAdminTests(unittest.TestCase):
         self.assertEqual(report["get"]["effective_referrer_policy"], "no-referrer")  # type: ignore[index]
         self.assertEqual((report["post"]["origin"], report["post"]["status"]), ("null", 403))  # type: ignore[index]
 
+    def test_an_app_that_accepts_a_cross_site_post_fails(self) -> None:
+        # Mutant: the app (or the case) stops refusing the forged POSTs. They must stay 403.
+        PermissiveApp.accept_cross_site = True
+        code, report = self.run_browser(self.ingress_port(), "--expect-policy", "no-referrer", base=BASE)
+        self.assertEqual(code, 1, report)
+        self.assertEqual(report["result"], "FAIL")
+        self.assertEqual([p["status"] for p in report["cross_site_posts"]], [302, 302])  # type: ignore[attr-defined]
+
+    def test_the_referer_follows_the_effective_policy(self) -> None:
+        PermissiveApp.head = '<meta name="referrer" content="origin">'
+        code, report = self.run_browser(self.app.server_port)
+        self.assertEqual(code, 0, report)
+        self.assertEqual(report["get"]["effective_referrer_policy"], "origin")  # type: ignore[index]
+        self.assertEqual(report["post"]["referer"], "http://homeassistant.local:8123/")  # type: ignore[index]
+
     def test_an_invalid_meta_is_ignored_and_fails_like_no_meta(self) -> None:
         PermissiveApp.head = '<meta name="referrer" content="sometimes">'
         PermissiveApp.refuse_null = True
@@ -222,8 +238,58 @@ class EffectivePolicyTests(unittest.TestCase):
         )
         self.assertEqual(self.policy("no-referrer", *metas), "same-origin")
 
-    def test_case_and_spaces(self) -> None:
-        self.assertEqual(self.policy("no-referrer", '<META NAME="Referrer" CONTENT="  Same-Origin ">'), "same-origin")
+    def test_case_alone_passes(self) -> None:
+        self.assertEqual(self.policy("no-referrer", '<META NAME="Referrer" CONTENT="Same-Origin">'), "same-origin")
+
+    def test_spaces_are_not_stripped(self) -> None:
+        # The HTML Standard compares `name` and takes `content` as they are (lowercased only):
+        # a browser ignores these metas, so the header (no-referrer) stays.
+        for meta in (
+            '<meta name="referrer" content=" same-origin ">',
+            '<meta name="referrer" content="same-origin ">',
+            '<meta name=" referrer" content="same-origin">',
+            '<meta name="referrer " content="same-origin">',
+        ):
+            self.assertEqual(self.policy("no-referrer", meta), "no-referrer", meta)
+
+    def test_the_case_folding_is_ascii_only(self) -> None:
+        self.assertEqual(self.policy("no-referrer", '<meta name="referrer" content="SAME-ORIGIN">'), "same-origin")
+        self.assertEqual(self.policy("no-referrer", '<meta name="referrer" content="same-origin\u212a">'), "no-referrer")
+
+    def test_legacy_values(self) -> None:
+        for legacy, policy in (
+            ("never", "no-referrer"),
+            ("default", "strict-origin-when-cross-origin"),
+            ("always", "unsafe-url"),
+            ("origin-when-crossorigin", "origin-when-cross-origin"),
+            ("ALWAYS", "unsafe-url"),
+        ):
+            meta = f'<meta name="referrer" content="{legacy}">'
+            self.assertEqual(self.policy("same-origin", meta), policy, legacy)
+
+    def test_a_meta_in_a_template_does_not_count(self) -> None:
+        template = '<template><meta name="referrer" content="same-origin"></template>'
+        self.assertEqual(self.policy("no-referrer", template), "no-referrer")
+        after = template + '<meta name="referrer" content="origin">'
+        self.assertEqual(self.policy("no-referrer", after), "origin")
+
+    def test_the_header_is_read_by_its_last_valid_token(self) -> None:
+        read = first_admin.header_referrer_policy
+        self.assertEqual(read("no-referrer"), "no-referrer")
+        self.assertEqual(read("origin, same-origin"), "same-origin")
+        self.assertEqual(read("same-origin, bogus"), "same-origin")
+        self.assertEqual(read("same-origin,  NO-REFERRER "), "no-referrer")
+        self.assertEqual(read("never"), "")  # legacy values are for the meta only
+        self.assertEqual(read(""), "")
+
+    def test_the_referer_of_a_same_origin_post(self) -> None:
+        origin, page = "http://homeassistant.local:8123", "/setup/"
+        referer = first_admin.request_referer
+        self.assertEqual(referer("no-referrer", origin, page), "")
+        for policy in ("origin", "strict-origin"):
+            self.assertEqual(referer(policy, origin, page), origin + "/", policy)
+        for policy in ("same-origin", "origin-when-cross-origin", "strict-origin-when-cross-origin", "unsafe-url", ""):
+            self.assertEqual(referer(policy, origin, page), origin + page, policy)
 
     def test_other_metas_do_not_count(self) -> None:
         self.assertEqual(self.policy("no-referrer", '<meta name="viewport" content="same-origin">'), "no-referrer")
