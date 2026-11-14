@@ -1,0 +1,59 @@
+name: Something does not work
+description: Tell us what went wrong with the Housecairn add-on.
+labels:
+  - bug
+assignees:
+  - Robvred
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for telling us. Short answers are fine.
+        For a security problem, do not use this form: see the security policy and report it privately.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: Tell us what you did and what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we see it ourselves?
+      description: The steps, one per line.
+  - type: input
+    id: version
+    attributes:
+      label: "Add-on version"
+      description: "Shown on the add-on page in Home Assistant. Write \"not sure\" if you do not know."
+    validations:
+      required: true
+  - type: dropdown
+    id: access
+    attributes:
+      label: "How you open Housecairn"
+      options:
+        - "Home Assistant sidebar panel"
+        - "Published port (direct address)"
+        - "Both"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot (optional)
+      description: Drag a picture here. Hide anything private first.
+  - type: textarea
+    id: log
+    attributes:
+      label: "Add-on log (optional)"
+      description: >-
+        Open the add-on page in Home Assistant, then the Log tab, and copy the last
+        lines. Remove addresses and names before you paste.
+      render: text
