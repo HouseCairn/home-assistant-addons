@@ -33,6 +33,7 @@ INGRESS_PATH=/api/hassio_ingress/$TOKEN
 SUPERVISOR_TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
 SUMMARY=${GITHUB_STEP_SUMMARY:-/dev/null}
 PROXY_PID=
+FAILED=()
 
 summary() { printf '%s\n' "$*" >>"$SUMMARY"; }
 pass() { printf 'PASS: %s\n' "$*"; summary "- PASS: $*"; }
@@ -136,8 +137,13 @@ first_admin() {
     pass "$case: first administrator created through the form; a cross-site POST refused"
   else
     echo "$out"
-    docker logs "$APP" 2>&1 | grep -E "^Forbidden|CSRF" >&2 || true
-    fail "$case: the first-administrator form did not go through as expected"
+    local log
+    log=$(docker logs "$APP" 2>&1)
+    grep -E "^Forbidden|CSRF" <<<"$log" >&2 || true
+    # The next ways in are still tried, for a complete report.
+    printf 'FAIL: %s\n' "$case: the first-administrator form did not go through as expected" >&2
+    summary "- **FAIL: $case: the first-administrator form did not go through as expected**"
+    FAILED+=("$case")
   fi
 }
 
@@ -165,3 +171,8 @@ docker stop -t 30 "$APP" >/dev/null
 code=$(docker inspect -f '{{.State.ExitCode}}' "$APP")
 [ "$code" = 0 ] || fail "port: the app did not stop cleanly (exit code $code)"
 pass "the app stopped cleanly"
+
+if [ "${#FAILED[@]}" -gt 0 ]; then
+  echo "FAIL: the first administrator could not be created through: ${FAILED[*]}" >&2
+  exit 1
+fi
