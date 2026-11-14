@@ -55,8 +55,9 @@ jobs:
       - name: Start the app and create the first administrator
         if: steps.changes.outputs.run == 'true'
         run: tests/start/start-test.sh housecairn-app:test
+      # Also when the test failed: the control says whether the test can fail.
       - name: "Negative control: a broken migration fails the test"
-        if: steps.changes.outputs.run == 'true'
+        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
         env:
           GITHUB_STEP_SUMMARY: /dev/null
         run: |
