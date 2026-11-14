@@ -15,6 +15,11 @@ request's referrer"):
   `iframe` with --frame (Home Assistant shows the app in a frame), else
   `document`.
 
+With --expect-policy, the page must come with exactly that `Referrer-Policy`,
+else the run fails before any POST: the browser's behaviour is chosen from the
+header, so a stand-in that lost it would test another case and pass on an app
+that has the bug of issue #11.
+
 First, the same POST as if another site sent it (`Sec-Fetch-Site: cross-site`,
 with `Origin` that site's, then `null` as from a page in `no-referrer`), with
 the page's cookie and token, the worst case: both must be refused (403). Then the real one: it must create the administrator (302 to the
@@ -110,6 +115,7 @@ def main() -> int:
     parser.add_argument("--host", required=True, help="the host (and port) in the browser's address bar")
     parser.add_argument("--base", default="", help="the Ingress path, or empty on the port")
     parser.add_argument("--code", required=True, help="the first-account code of the app's log")
+    parser.add_argument("--expect-policy", help="fail unless the page's Referrer-Policy is exactly this")
     parser.add_argument("--frame", action="store_true", help="the page is in Home Assistant's frame")
     args = parser.parse_args()
     browser = Browser(args.connect, args.host, args.frame)
@@ -121,6 +127,16 @@ def main() -> int:
     )
     policy = last(headers, "Referrer-Policy").split(",")[-1].strip().lower()
     report["get"] = {"status": status, "referrer_policy": policy}
+    if args.expect_policy is not None:
+        report["get"]["expected_referrer_policy"] = args.expect_policy.lower()  # type: ignore[index]
+    if args.expect_policy is not None and policy != args.expect_policy.lower():
+        report["error"] = (
+            f"Referrer-Policy of the page: {policy or 'missing'}, expected {args.expect_policy.lower()}: "
+            "the case does not reproduce the browser it stands for"
+        )
+        report["result"] = "FAIL"
+        print(json.dumps(report, indent=1))
+        return 1
     token = re.search(rb'name="csrfmiddlewaretoken" value="([^"]+)"', body)
     action = re.search(rb'<form method="post" action="([^"]+)"', body)
     if status != 200 or not token or not action:

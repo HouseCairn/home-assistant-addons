@@ -230,5 +230,36 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), text)
 
 
+class ScheduleStateTests(unittest.TestCase):
+    """GitHub disables the cron of a public repository after 60 days without activity."""
+
+    def state(self, state: str) -> str:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "workflow.json"
+            path.write_text(json.dumps({"state": state}), encoding="utf-8")
+            return update.schedule_state("HouseCairn/home-assistant-addons", path)
+
+    def test_an_active_workflow_is_fine(self) -> None:
+        self.assertEqual(self.state("active"), "active")
+
+    def test_a_forks_default_is_no_failure(self) -> None:
+        self.assertEqual(self.state("disabled_fork"), "disabled_fork")
+
+    def test_a_disabled_workflow_fails_visibly(self) -> None:
+        for state in ("disabled_inactivity", "disabled_manually"):
+            with self.subTest(state=state), self.assertRaisesRegex(update.UpdateError, state):
+                self.state(state)
+
+    def test_no_answer_is_no_failure(self) -> None:
+        # No network, rate limit, or a workflow not on the default branch yet (404).
+        def refuse(url: str, headers: dict[str, str]) -> tuple[bytes, object]:
+            raise OSError("no answer")
+
+        real = update._get
+        update._get = refuse  # type: ignore[assignment]
+        self.addCleanup(setattr, update, "_get", real)
+        self.assertTrue(update.schedule_state("HouseCairn/home-assistant-addons").startswith("unknown"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,11 @@ Standard library only.
       the tag v<version>, on a GitHub-hosted runner. The same identity as in the
       main repository's docs/security/verify-image.md. Needs GH_TOKEN (any token:
       the attestations of a public repository are public).
+  app_update.py schedule <owner/repo> [--workflow-json FILE]
+      Fail when GitHub has disabled the scheduled run of app-update.yaml (it does
+      so for a public repository without activity for 60 days, and the cron then
+      stops without a word). Public API, no token. A workflow that is not on the
+      default branch yet, or an API that does not answer, is not a failure.
 """
 
 from __future__ import annotations
@@ -93,6 +98,36 @@ def _get(url: str, headers: dict[str, str]) -> tuple[bytes, Any]:
     request = urllib.request.Request(url, headers={"User-Agent": "housecairn-app-update", **headers})
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310 (https only)
         return response.read(), response.headers
+
+
+SCHEDULED_WORKFLOW = "app-update.yaml"
+
+
+def schedule_state(repository: str, workflow_json: Path | None = None) -> str:
+    """The state GitHub gives the scheduled workflow; raises when it is disabled.
+
+    `disabled_inactivity` is the 60-day rule of public repositories: the cron
+    stops, nothing tells anyone, and the app falls behind. `disabled_fork` is a
+    fork's default and is no failure. Without an answer (no network, rate limit,
+    or a workflow still to be merged: 404) there is nothing to say: the dry run
+    must not turn red for an outage that is not the pull request's.
+    """
+    if workflow_json is not None:
+        state = str(json.loads(workflow_json.read_text(encoding="utf-8")).get("state", ""))
+    else:
+        url = f"https://api.github.com/repos/{repository}/actions/workflows/{SCHEDULED_WORKFLOW}"
+        try:
+            body, _ = _get(url, {"Accept": "application/vnd.github+json"})
+            state = str(json.loads(body).get("state", ""))
+        except (OSError, ValueError) as exc:  # HTTPError is an OSError
+            return f"unknown ({exc.__class__.__name__}: {exc})"
+    if state.startswith("disabled") and state != "disabled_fork":
+        raise UpdateError(
+            f"GitHub has disabled the scheduled run of {SCHEDULED_WORKFLOW} ({state}): "
+            "no new Housecairn release will open a pull request until it is enabled again "
+            f"(Actions, App update, Enable workflow; docs/decisions.md, D13)"
+        )
+    return state
 
 
 def latest_release(release_json: Path | None = None) -> dict[str, str]:
@@ -248,6 +283,9 @@ def main(argv: list[str] | None = None) -> int:
     p_verify = sub.add_parser("verify")
     p_verify.add_argument("version")
     p_verify.add_argument("digest")
+    p_schedule = sub.add_parser("schedule")
+    p_schedule.add_argument("repository")
+    p_schedule.add_argument("--workflow-json", type=Path)
     p_apply = sub.add_parser("apply")
     p_apply.add_argument("version")
     p_apply.add_argument("digest")
@@ -265,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             print(resolve(args.version))
         elif args.command == "verify":
             verify(args.version, args.digest)
+        elif args.command == "schedule":
+            print(f"{SCHEDULED_WORKFLOW}: {schedule_state(args.repository, args.workflow_json)}")
         else:
             apply(args.version, args.digest, args.url)
     except UpdateError as exc:

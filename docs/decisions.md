@@ -396,6 +396,23 @@ workflow runs on `schedule` and `workflow_dispatch` alone, never on a
 is set up, a run that finds a release stops in red with what to do, after the
 checks.
 
+**The schedule can stop without a word.** GitHub disables the `schedule` of a
+workflow in a public repository after 60 days without activity in it, and
+nothing tells anyone: the app would fall behind without a pull request. A pull
+request is an activity, so a repository that is worked on keeps its cron; one
+that is left alone does not. Two guards, and a limit:
+
+- the dry run of every pull request (`app_update.py schedule`) reads the state
+  of `app-update.yaml` through the public API, no token and no added permission,
+  and fails when it is `disabled_inactivity` or `disabled_manually`
+  (`disabled_fork`, a fork's default, is no failure; an API that does not answer,
+  or a workflow still to be merged, is no failure either, so that an outage
+  does not block a merge). Enabling it again is one click (Actions, App update);
+- `workflow_dispatch` stays, to run it by hand;
+- the limit: nobody is warned while no pull request is opened. A quiet
+  repository is only noticed at the next pull request or by looking at the
+  Actions tab.
+
 Rejected:
 
 - **`GITHUB_TOKEN` and "Allow GitHub Actions to create and approve pull

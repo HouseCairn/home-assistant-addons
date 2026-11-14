@@ -13,7 +13,9 @@
 #   port       the port published on the host, without Ingress
 #
 # Ingress is tests/start/ingress.py: Home Assistant's header handling, and
-# Core's `Referrer-Policy: no-referrer` on every response. Each case starts
+# Core's `Referrer-Policy: no-referrer` on every response, which the Ingress
+# case requires of the page (--expect-policy), else it would not be testing
+# the browser behaviour of issue #11. Each case starts
 # from an empty /data, so the migrations run each time. It fails when the app
 # does not become healthy, when a migration fails, or when the form is refused.
 set -euo pipefail
@@ -145,7 +147,8 @@ first_admin() {
 
 # 1. Ingress, from the Supervisor's address.
 start_case ingress '{"allowed_hosts": []}' null
-first_admin ingress --connect 127.0.0.1:8099 --host homeassistant.local:8123 --base "$INGRESS_PATH" --frame
+first_admin ingress --connect 127.0.0.1:8099 --host homeassistant.local:8123 --base "$INGRESS_PATH" --frame \
+  --expect-policy no-referrer
 
 # 2. The port published on the host, without Ingress.
 start_case port '{"allowed_hosts": ["localhost"]}' '{"8000/tcp": 8000}'

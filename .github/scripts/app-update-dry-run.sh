@@ -3,6 +3,9 @@
 #
 # Usage: .github/scripts/app-update-dry-run.sh
 #
+# 0. The scheduled run of app-update.yaml: red when GitHub has disabled it (60
+#    days without activity on a public repository), so that it does not stop in
+#    silence. Needs GITHUB_REPOSITORY, skipped without.
 # 1. The real app against the latest Housecairn release: prints whether it is
 #    up to date.
 # 2. A newer release, simulated: a copy of the repository moved back to
@@ -14,6 +17,11 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OLD_VERSION=0.3.0
 OLD_DIGEST=sha256:e51ea5b565cb69ec4473634579647d18c26344b3baad12dfae5dbc74001cb340
+
+if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  echo "=== The scheduled run of app-update.yaml"
+  python3 "$ROOT/.github/scripts/app_update.py" schedule "$GITHUB_REPOSITORY"
+fi
 
 echo "=== The app against the latest release"
 python3 "$ROOT/.github/scripts/app_update.py" check
