@@ -53,5 +53,7 @@ body:
     id: log
     attributes:
       label: "Add-on log (optional)"
-      description: "Open the add-on page in Home Assistant, then the Log tab, and copy the last lines. Remove addresses and names before you paste."
+      description: >-
+        Open the add-on page in Home Assistant, then the Log tab, and copy the last
+        lines. Remove addresses and names before you paste.
       render: text
