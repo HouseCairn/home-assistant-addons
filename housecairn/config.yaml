@@ -61,11 +61,18 @@ environment:
 # its interface, leaves it editable there. allowed_hosts is only used, and
 # then required, when the port is published on the host: through ingress
 # alone, every host name is accepted (D10).
+#
+# trusted_origins is only needed behind a reverse proxy in front of Home
+# Assistant that changes the Host header or does not set X-Forwarded-Proto:
+# one exact origin per entry, never a wildcard (D11).
 options:
   allowed_hosts: []
+  trusted_origins: []
 schema:
   allowed_hosts:
     - "match(^(\\.?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\\[[0-9A-Fa-f:.]+\\])$)?"
+  trusted_origins:
+    - "match(^[Hh][Tt][Tt][Pp][Ss]?://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\\[[0-9A-Fa-f:.]+\\])(:[0-9]{1,5})?/?$)?"
   default_language: list(en|fr)?
   time_zone: "match(^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$)?"
   signup_open: bool?

@@ -29,6 +29,7 @@ the image, in isolated mode (`python3 -I`), before any HouseCairn code.
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -252,6 +253,10 @@ def environment_from_options(
     if site_url:
         env["HOUSECAIRN_SITE_URL"] = site_url
 
+    origins = _trusted_origins(options)
+    if origins:
+        env["CSRF_TRUSTED_ORIGINS"] = ",".join(origins)
+
     admin_email = _text(options, "bootstrap_admin_email")
     if admin_email:
         env["HOUSECAIRN_BOOTSTRAP_ADMIN_EMAIL"] = admin_email
@@ -290,6 +295,71 @@ def _site_url(options: Mapping[str, Any]) -> str:
             "such as http://192.0.2.10:8000."
         )
     return value.rstrip("/")
+
+
+def _trusted_origins(options: Mapping[str, Any]) -> list[str]:
+    """CSRF_TRUSTED_ORIGINS of HouseCairn, from trusted_origins (D11); empty when unset.
+
+    Through ingress, HouseCairn accepts a form when the browser's Origin is its
+    own scheme and Host, as Home Assistant passes them on. A reverse proxy in
+    front of Home Assistant that changes the Host header, or does not set
+    X-Forwarded-Proto, breaks that match, and every form gets "Session expired"
+    (403). Each entry names one origin exactly, as a browser writes it: no
+    wildcard, no path, lower case, no default port. The token and cookie
+    checks still apply to every form.
+    """
+    value = options.get("trusted_origins")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise OptionError("option trusted_origins must be a list of origins.")
+    origins: list[str] = []
+    for entry in value:
+        origin = _origin(entry) if isinstance(entry, str) else ""
+        if not origin:
+            raise OptionError(
+                f"option trusted_origins: {entry!r} is not an origin: write the scheme, name and "
+                "port the browser shows for Home Assistant, such as https://ha.example.com or "
+                "https://192.0.2.10:8123, without a path. * is refused."
+            )
+        origins.append(origin)
+    return origins
+
+
+def _origin(entry: str) -> str:
+    """`entry` as a browser's Origin header, or "" when it is not one origin."""
+    text = entry.strip()
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        return ""
+    try:
+        parts = urlsplit(text)
+        scheme = parts.scheme.lower()
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:  # brackets that do not hold an address, a port out of range
+        return ""
+    if (
+        scheme not in ("http", "https")
+        or parts.path.strip("/")
+        or parts.query
+        or parts.fragment
+        or parts.username is not None
+        or parts.password is not None
+        or port == 0
+    ):
+        return ""
+    # urlsplit gives the name without brackets, in lower case.
+    name = f"[{host}]" if ":" in host else host
+    if ":" in host:
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            return ""
+    elif not HOST.fullmatch(name) or name.startswith("."):
+        return ""
+    if port is None or port == {"http": 80, "https": 443}[scheme]:
+        return f"{scheme}://{name}"
+    return f"{scheme}://{name}:{port}"
 
 
 def _oidc(options: Mapping[str, Any]) -> dict[str, str]:

@@ -42,7 +42,7 @@ tab in Home Assistant), and Housecairn's at <https://docs.housecairn.app>.
 - Creates the **first administrator** from a one-time code written in the
   app's **Log** tab: no shell needed.
 - Builds on Housecairn's published image, with a few options (host names,
-  language, time zone, public address, single sign-on).
+  language, time zone, public address, trusted origins, single sign-on).
 - Runs with **least privilege**: no host network, no Home Assistant API access,
   no access to other folders, no added capability.
 
