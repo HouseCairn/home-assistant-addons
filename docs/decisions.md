@@ -464,3 +464,139 @@ Rejected:
   also loosens the check for what the page can fix itself.
 - **Treating `Origin: null` as no origin**: over HTTP, Django then checks the
   token alone, for a forged form as for a real one.
+
+## D13. A pull request for each Housecairn release
+
+The app is a layer over HouseCairn's image (D2), and its version is the tag of
+that image (D4). Dependabot does not follow the image: it would change the
+Dockerfile alone, without `version` in `config.yaml` and the changelog. The
+workflow `.github/workflows/app-update.yaml` does it instead, every day and
+on demand:
+
+1. it compares the latest published release of HouseCairn (the public
+   `releases/latest` API, which returns no draft nor pre-release) with the tag
+   in the Dockerfile, as version numbers;
+2. when the release is newer, it reads the digest of the tag's
+   multi-architecture index on ghcr.io (anonymous pull), checks that it is the
+   SHA-256 of the index the registry sent and that the index holds
+   `linux/amd64` and `linux/arm64`;
+3. it verifies the signed build provenance of that digest with
+   `gh attestation verify` (Sigstore): built by HouseCairn's `image.yml`
+   workflow, from the tag `refs/tags/vX.Y.Z`, on a GitHub-hosted runner, the
+   identity that HouseCairn's `docs/security/verify-image.md` documents.
+   HouseCairn signs its image with GitHub's artifact attestations, not with a
+   separate `cosign sign`: the provenance is the signature to check;
+4. it changes the Dockerfile (tag and digest), `version` and the changelog in
+   one commit (an entry that points to the release notes; entries under
+   "Unreleased" move under the new version), and opens the pull request of
+   the branch `app-update/housecairn`, or updates it when a newer release
+   comes out before it is merged. There is never more than one.
+
+The pull request says what to check before merging: the release notes and
+the "Home Assistant impact" of HouseCairn's pull requests, for an option, a
+variable or a behaviour behind Ingress that the app must follow
+(`config.yaml`, `run.py`). The start test (D14) runs on it.
+
+**Who opens the pull request: the project's GitHub App.** A pull request
+opened with the workflow's `GITHUB_TOKEN` starts no workflow, so its checks
+would never run and the rules of `main` would block it. A token of a GitHub
+App does start them. The App is installed on this repository only, with
+**Contents** and **Pull requests** in read and write and nothing else; the
+workflow asks for a token limited to those two and to this repository, valid
+for an hour. Its client ID and private key are a variable and a secret of the
+`app-update` environment, whose deployment rule allows `main` only: the
+workflow runs on `schedule` and `workflow_dispatch` alone, never on a
+`pull_request`, so no fork and no pull request can read the key. Until the App
+is set up, a run that finds a release stops in red with what to do, after the
+checks.
+
+**The schedule can stop without a word.** GitHub disables the `schedule` of a
+workflow in a public repository after 60 days without activity in it, and
+nothing tells anyone: the app would fall behind without a pull request. A pull
+request is an activity, so a repository that is worked on keeps its cron; one
+that is left alone does not. Two guards, and a limit:
+
+- the dry run of every pull request (`app_update.py schedule`) reads the state
+  of `app-update.yaml` through the public API, no token and no added permission,
+  and fails when it is `disabled_inactivity` or `disabled_manually`
+  (`disabled_fork`, a fork's default, is no failure; an API that does not answer,
+  or a workflow still to be merged, is no failure either, so that an outage
+  does not block a merge). Enabling it again is one click (Actions, App update);
+- `workflow_dispatch` stays, to run it by hand;
+- the limit: nobody is warned while no pull request is opened. A quiet
+  repository is only noticed at the next pull request or by looking at the
+  Actions tab.
+
+Rejected:
+
+- **`GITHUB_TOKEN` and "Allow GitHub Actions to create and approve pull
+  requests"**: the pull request would have no checks, and the setting also
+  lets every workflow of the repository approve pull requests.
+- **A personal access token**: tied to a person and to everything that person
+  can reach, long-lived, and the pull request would be the maintainer's own,
+  which the maintainer cannot approve.
+- **A deploy key**, to push the branch so that the push starts the checks: it
+  writes to the whole repository and needs the pull request opened by another
+  token anyway.
+
+The branch is only replaced for a newer release, and only while every commit
+on it is the App's: changes made by hand on it (an option the release needs)
+are never overwritten; the run then stops and asks for the update by hand.
+`lint.yaml` runs the same steps on every pull request, without pushing
+anything (**App update (dry run)**): the app against the latest release, then
+a copy moved back to 0.3.0, which must be found out of date, resolved,
+verified and changed.
+
+## D14. A start test on every pull request
+
+The unit tests of `run.py` check the environment it computes, not that
+HouseCairn starts with it, nor what a browser meets through Ingress. Issue #11
+showed the gap: Home Assistant Core's `http` component sets
+`Referrer-Policy: no-referrer` on every response, the ones it relays from an
+app through Ingress included (`homeassistant/components/http/headers.py`,
+which replaces the app's own policy); under that policy a browser sends the
+form's POST with `Origin: null`, and HouseCairn refused the creation of the
+first administrator.
+
+The workflow `.github/workflows/start-test.yaml` (job **Start test (amd64)**)
+builds the app for `linux/amd64` on every pull request that changes
+`housecairn/` (the App update's, D13, included), and runs
+`tests/start/start-test.sh`:
+
+- the app is started as the Supervisor starts it: as root, `/data` with
+  `options.json` in mode 600, the `environment` of `config.yaml`,
+  `SUPERVISOR_TOKEN`, an init, `/tmp` in memory, on a network shaped like the
+  Supervisor's (`172.30.32.0/23`, the Supervisor at `.2`, the app in
+  `172.30.33.0/24`), with a stand-in Supervisor that answers
+  `/addons/self/info` (D10);
+- `tests/start/ingress.py` relays Ingress with the header handling of Core
+  and of the Supervisor copied from their code, and Core's response headers,
+  `Referrer-Policy: no-referrer` first;
+- `tests/start/first_admin.py` does what a browser does on the first-account
+  page: GET, then POST of the form with the cookies of the page, `Origin` and
+  `Referer` as the Fetch standard sets them under the page's referrer policy,
+  and `Sec-Fetch-*`; the administrator must be created (302 to the instance's
+  overview, which then opens signed in), and the same POST sent by another
+  site (`Sec-Fetch-Site: cross-site`, its own origin or `null`), with the
+  page's cookie and token, must be refused;
+- two ways in, each from an empty `/data` so the migrations run each time:
+  Ingress, relayed from the Supervisor's address (`172.30.32.2`, the app's
+  peer; Core's address, `172.30.32.1`, is the last entry of
+  `X-Forwarded-For`, which HouseCairn logs as the client), and the published
+  port;
+- it fails when the app does not become healthy, when a migration fails or
+  when the form is refused. A negative control runs the same test on the app
+  with a migration broken on purpose (`tests/start/broken.Dockerfile`), which
+  must fail.
+
+The fix of issue #11 is in HouseCairn, not in this repository (D12,
+HouseCairn/housecairn#139): the `trusted_origins` option (D11) does not change
+the case this test reproduces, `Origin: null`. Until the app is built on the
+first HouseCairn image that contains #139 (0.3.2 expected), the Ingress case
+fails on the form's POST, which is the bug the test reports; it passes once
+the app is on that image.
+
+The job runs on every pull request and only skips its steps when nothing the
+app is built from changed, so that it can be a required check of `main`.
+`arm64` is not started: the image is the same multi-architecture index, and
+the runner would need emulation.

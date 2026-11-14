@@ -1,0 +1,71 @@
+# Start test of the app (docs/decisions.md, D14): build the app for amd64,
+# start it as the Supervisor does, through Ingress and on the published port,
+# and create the first administrator through the real form. Runs on every pull
+# request, the App update's included (D13); the build and the test are skipped
+# when nothing the app is built from changed, so the job can be a required
+# check. Then a negative control: the same test on the app with a broken
+# migration must fail.
+name: Start test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  start-test:
+    name: Start test (amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Does the pull request change the app?
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          echo "$changed"
+          if grep -qE '^(housecairn/|tests/start/|\.github/workflows/start-test\.yaml$)' <<<"$changed"; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "Nothing the app is built from changed: no start test." >>"$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Build the app (linux/amd64)
+        if: steps.changes.outputs.run == 'true'
+        run: docker build --platform linux/amd64 --pull -t housecairn-app:test housecairn
+      - name: Start the app and create the first administrator
+        if: steps.changes.outputs.run == 'true'
+        run: tests/start/start-test.sh housecairn-app:test
+      # Also when the test failed: the control says whether the test can fail.
+      - name: "Negative control: a broken migration fails the test"
+        if: ${{ !cancelled() && steps.changes.outputs.run == 'true' }}
+        env:
+          GITHUB_STEP_SUMMARY: /dev/null
+        run: |
+          docker build -q -t housecairn-app:broken -f tests/start/broken.Dockerfile tests/start
+          if tests/start/start-test.sh housecairn-app:broken >"$RUNNER_TEMP/broken.log" 2>&1; then
+            cat "$RUNNER_TEMP/broken.log"
+            echo "::error::The start test passed on an app whose migration fails."
+            exit 1
+          fi
+          grep -E "FAIL:|migrations failed|broken on purpose" "$RUNNER_TEMP/broken.log"
+          grep -q "migrations failed" "$RUNNER_TEMP/broken.log"
