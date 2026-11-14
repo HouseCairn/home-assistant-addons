@@ -449,8 +449,8 @@ network and reaches the Supervisor from the gateway of the `hassio` network,
 the Supervisor gives Core that address, `supervisor/docker/homeassistant.py`
 line 94, 2026.11.0), which is not trusted, so HouseCairn takes it as the
 client (D9, sign-in rate limits). Same in the test chain: the log shows the
-address of the Core copy, not the Supervisor's. `X-Forwarded-Proto` and `X-Ingress-Path` are read from the
-Supervisor, the TCP peer: the scheme of the expected origin is right, and the
+address of the Core copy, not the Supervisor's. `X-Forwarded-Proto` and
+`X-Ingress-Path` are read from the Supervisor, the TCP peer: the scheme of the expected origin is right, and the
 prefix appears in the path of the refusal.
 
 Rejected:
