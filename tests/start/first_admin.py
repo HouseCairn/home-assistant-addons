@@ -7,18 +7,26 @@ GET <base>/setup/, keep its cookies, then POST the form as a browser does from
 that page (WHATWG Fetch, "append a request `Origin` header" and "determine
 request's referrer"):
 
-- under the `Referrer-Policy` of the response: `no-referrer` (what Home
-  Assistant's Ingress sets, D14) sends `Origin: null` and no Referer; any
-  other policy, for this same-origin POST, sends the page's origin, and the
-  page's address as Referer;
+- under the page's effective referrer policy, as a browser computes it: the
+  `Referrer-Policy` header of the response (its last valid token, Referrer
+  Policy), replaced by the last valid `<meta name="referrer">` of the document
+  (HTML Standard, the meta element's `name` attribute, referrer state: `name`
+  ASCII case-insensitive, `content` lowercased, neither trimmed, the legacy
+  values mapped, a meta in a `<template>` not in the document). `no-referrer`
+  (what Home Assistant's Ingress sets on the header, D14, and what a page
+  without the meta keeps) sends `Origin: null` and no Referer; any other
+  policy, for this same-origin POST, sends the page's origin, and as Referer
+  the page's address (only its origin under `origin` and `strict-origin`);
 - `Sec-Fetch-Site: same-origin`, `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest`
   `iframe` with --frame (Home Assistant shows the app in a frame), else
   `document`.
 
-With --expect-policy, the page must come with exactly that `Referrer-Policy`,
-else the run fails before any POST: the browser's behaviour is chosen from the
-header, so a stand-in that lost it would test another case and pass on an app
-that has the bug of issue #11.
+With --expect-policy, the page must come with exactly that `Referrer-Policy`
+header, else the run fails before any POST: the stand-in models Core, so one
+that lost the header would test another case. The header is not the whole
+story: the meta of the page may replace it, and the POST follows the effective
+policy, so an app without the fix of issue #11 (a page with no meta) still
+sends `Origin: null` here and is refused. The report has both policies.
 
 First, the same POST as if another site sent it (`Sec-Fetch-Site: cross-site`,
 with `Origin` that site's, then `null` as from a page in `no-referrer`), with
@@ -34,10 +42,124 @@ import http.client
 import json
 import re
 import sys
+from html.parser import HTMLParser
 from http.cookies import SimpleCookie
 from urllib.parse import urlencode, urlsplit
 
 PASSWORD = "correct horse battery staple 9"  # noqa: S105 (a test instance)
+
+
+# The values of the Referrer Policy standard; a meta with any other value is ignored.
+REFERRER_POLICIES = frozenset(
+    {
+        "no-referrer",
+        "no-referrer-when-downgrade",
+        "same-origin",
+        "origin",
+        "strict-origin",
+        "origin-when-cross-origin",
+        "strict-origin-when-cross-origin",
+        "unsafe-url",
+    }
+)
+
+
+# The legacy values the meta element still accepts (HTML Standard, referrer state), with the
+# policy each stands for; "default" is the default referrer policy.
+LEGACY_REFERRER_POLICIES = {
+    "never": "no-referrer",
+    "default": "strict-origin-when-cross-origin",
+    "always": "unsafe-url",
+    "origin-when-crossorigin": "origin-when-cross-origin",
+}
+
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def ascii_lower(text: str) -> str:
+    """ASCII lowercase only (`str.lower` would also fold, say, the Kelvin sign)."""
+    return text.translate(_ASCII_LOWER)
+
+
+class _MetaReferrer(HTMLParser):
+    """The `content` of every `<meta name="referrer">` of the document, in document order.
+
+    No whitespace is stripped, as in the HTML Standard; a meta inside a `<template>` is not
+    in the document (its content is a separate fragment), so it does not count.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.values: list[str] = []
+        self.templates = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "template":
+            self.templates += 1
+        elif tag == "meta" and not self.templates:
+            found = {name: value or "" for name, value in attrs}
+            if ascii_lower(found.get("name", "")) == "referrer" and "content" in found:
+                self.values.append(found["content"])
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "template" and self.templates:
+            self.templates -= 1
+
+
+def meta_referrer_policy(body: str) -> str:
+    """The policy the last valid `<meta name="referrer">` sets, or "" (none, or none valid).
+
+    The element's content is lowercased (ASCII), not trimmed, and a legacy value is mapped to
+    its policy before the test; a value that is not a referrer policy leaves the policy as it
+    was.
+    """
+    parser = _MetaReferrer()
+    parser.feed(body)
+    policy = ""
+    for value in parser.values:
+        value = ascii_lower(value)
+        value = LEGACY_REFERRER_POLICIES.get(value, value)
+        if value in REFERRER_POLICIES:
+            policy = value
+    return policy
+
+
+def header_referrer_policy(value: str) -> str:
+    """The policy of a `Referrer-Policy` header: its last valid token (Referrer Policy, "parse").
+
+    Tokens are comma-separated and trimmed of ASCII whitespace; legacy values are not
+    accepted here; "" when no token is valid.
+    """
+    policy = ""
+    for token in value.split(","):
+        token = ascii_lower(token.strip(" \t\n\f\r"))
+        if token in REFERRER_POLICIES:
+            policy = token
+    return policy
+
+
+def effective_policy(header: str, body: str) -> str:
+    """What a browser applies to the document: the header's policy, replaced by the meta's."""
+    return meta_referrer_policy(body) or header
+
+
+def request_origin(policy: str, origin: str) -> str:
+    """The `Origin` of a same-origin POST over HTTP (Fetch, "append a request `Origin` header").
+
+    The request is neither GET nor HEAD and its mode is not cors (a form navigation), so the
+    policy decides: `no-referrer` gives the opaque origin; `same-origin` and the others, for a
+    request to the same origin and without an HTTPS-to-HTTP downgrade, give the origin.
+    """
+    return "null" if policy == "no-referrer" else origin
+
+
+def request_referer(policy: str, origin: str, page: str) -> str:
+    """The `Referer` of that POST ("" for none): the page's address, trimmed to its origin
+    under `origin` and `strict-origin` (Referrer Policy, "determine request's referrer").
+    """
+    if policy == "no-referrer":
+        return ""
+    return origin + "/" if policy in ("origin", "strict-origin") else origin + page
 
 
 class Jar:
@@ -115,7 +237,7 @@ def main() -> int:
     parser.add_argument("--host", required=True, help="the host (and port) in the browser's address bar")
     parser.add_argument("--base", default="", help="the Ingress path, or empty on the port")
     parser.add_argument("--code", required=True, help="the first-account code of the app's log")
-    parser.add_argument("--expect-policy", help="fail unless the page's Referrer-Policy is exactly this")
+    parser.add_argument("--expect-policy", help="fail unless the Referrer-Policy header of the page is exactly this")
     parser.add_argument("--frame", action="store_true", help="the page is in Home Assistant's frame")
     args = parser.parse_args()
     browser = Browser(args.connect, args.host, args.frame)
@@ -125,8 +247,9 @@ def main() -> int:
     status, headers, body = browser.request(
         "GET", page, {"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": browser.dest}
     )
-    policy = last(headers, "Referrer-Policy").split(",")[-1].strip().lower()
-    report["get"] = {"status": status, "referrer_policy": policy}
+    policy = header_referrer_policy(last(headers, "Referrer-Policy"))
+    effective = effective_policy(policy, body.decode("utf-8", "replace"))
+    report["get"] = {"status": status, "referrer_policy": policy, "effective_referrer_policy": effective}
     if args.expect_policy is not None:
         report["get"]["expected_referrer_policy"] = args.expect_policy.lower()  # type: ignore[index]
     if args.expect_policy is not None and policy != args.expect_policy.lower():
@@ -154,10 +277,9 @@ def main() -> int:
             "password2": PASSWORD,
         }
     ).encode()
-    if policy == "no-referrer":
-        origin: dict[str, str] = {"Origin": "null"}
-    else:
-        origin = {"Origin": browser.origin, "Referer": browser.origin + page}
+    origin = {"Origin": request_origin(effective, browser.origin)}
+    if referer := request_referer(effective, browser.origin, page):
+        origin["Referer"] = referer
     form = {
         **origin,
         "Content-Type": "application/x-www-form-urlencoded",
@@ -177,7 +299,12 @@ def main() -> int:
 
     status, headers, _ = browser.request("POST", target, {**form, "Sec-Fetch-Site": "same-origin"}, fields)
     location = last(headers, "Location")
-    report["post"] = {"status": status, "origin": origin["Origin"], "location": location}
+    report["post"] = {
+        "status": status,
+        "origin": origin["Origin"],
+        "referer": origin.get("Referer", ""),
+        "location": location,
+    }
     overview = f"{args.base}/instance/"
     if status != 302 or urlsplit(location).path != overview:
         ok = False
