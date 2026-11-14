@@ -3,9 +3,10 @@
   ingress.py supervisor   in a container at 172.30.32.2, alias `supervisor`: answers
                           GET /addons/self/info on port 80 (what run.py asks, D10),
                           and relays Ingress on port 8099
-  ingress.py proxy        Ingress only, on port 8099; run on the Docker host, it
-                          reaches the app from the gateway of the network,
-                          172.30.32.1
+
+The app sees the Supervisor, 172.30.32.2, as its peer, and Core's address,
+172.30.32.1, as the last entry of X-Forwarded-For: HouseCairn takes that entry
+as the client address (`core/proxy.py`), the one its log shows.
 
 Environment: APP_URL (http://<app address>:8000), SUPERVISOR_TOKEN (the token
 the app was given), NETWORK (JSON: `null`, or {"8000/tcp": 8000} when the port
@@ -177,18 +178,14 @@ class SelfInfo(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    role = sys.argv[1] if len(sys.argv) > 1 else ""
-    if role not in ("supervisor", "proxy"):
+    if sys.argv[1:] != ["supervisor"]:
         sys.stderr.write(__doc__ or "")
         return 2
     host, _, port = os.environ.get("LISTEN", "0.0.0.0:8099").rpartition(":")
-    servers = [ThreadingHTTPServer((host, int(port)), Ingress)]
-    if role == "supervisor":
-        servers.append(ThreadingHTTPServer(("0.0.0.0", 80), SelfInfo))  # noqa: S104
-    for server in servers[1:]:
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-    sys.stderr.write(f"{role}: listening\n")
-    servers[0].serve_forever()
+    api = ThreadingHTTPServer(("0.0.0.0", 80), SelfInfo)  # noqa: S104 (test network)
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    sys.stderr.write("supervisor: listening\n")
+    ThreadingHTTPServer((host, int(port)), Ingress).serve_forever()
     return 0
 
 

@@ -15,9 +15,9 @@ request's referrer"):
   `iframe` with --frame (Home Assistant shows the app in a frame), else
   `document`.
 
-First, the same POST as if it came from another site (`Sec-Fetch-Site:
-cross-site`, with the page's cookie and token, the worst case): it must be
-refused (403). Then the real one: it must create the administrator (302 to the
+First, the same POST as if another site sent it (`Sec-Fetch-Site: cross-site`,
+with `Origin` that site's, then `null` as from a page in `no-referrer`), with
+the page's cookie and token, the worst case: both must be refused (403). Then the real one: it must create the administrator (302 to the
 instance's overview, under <base>), and the next page must open signed in.
 Exit status 0 when both hold; a JSON report on standard output either way.
 """
@@ -150,9 +150,14 @@ def main() -> int:
         "Sec-Fetch-User": "?1",
     }
 
-    status, _, _ = browser.request("POST", target, {**form, "Sec-Fetch-Site": "cross-site"}, fields)
-    report["cross_site_post"] = {"status": status, "origin": origin["Origin"]}
-    ok = status == 403
+    ok = True
+    report["cross_site_posts"] = []
+    for forged in ("https://attacker.example", "null"):
+        forged_form = {k: v for k, v in form.items() if k != "Referer"}
+        forged_form.update({"Origin": forged, "Sec-Fetch-Site": "cross-site"})
+        status, _, _ = browser.request("POST", target, forged_form, fields)
+        report["cross_site_posts"].append({"status": status, "origin": forged})  # type: ignore[union-attr]
+        ok = ok and status == 403
 
     status, headers, _ = browser.request("POST", target, {**form, "Sec-Fetch-Site": "same-origin"}, fields)
     location = last(headers, "Location")

@@ -9,10 +9,8 @@
 # each way in, creates the first administrator through the real form, as a
 # browser does (tests/start/first_admin.py):
 #
-#   ingress            Ingress relayed from the Supervisor's address, 172.30.32.2
-#   ingress-gateway    Ingress relayed from the network's gateway, 172.30.32.1,
-#                      where Home Assistant Core, on the host network, comes from
-#   port               the port published on the host, without Ingress
+#   ingress    Ingress, relayed from the Supervisor's address, 172.30.32.2
+#   port       the port published on the host, without Ingress
 #
 # Ingress is tests/start/ingress.py: Home Assistant's header handling, and
 # Core's `Referrer-Policy: no-referrer` on every response. Each case starts
@@ -32,7 +30,6 @@ TOKEN=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 INGRESS_PATH=/api/hassio_ingress/$TOKEN
 SUPERVISOR_TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
 SUMMARY=${GITHUB_STEP_SUMMARY:-/dev/null}
-PROXY_PID=
 FAILED=()
 
 summary() { printf '%s\n' "$*" >>"$SUMMARY"; }
@@ -48,7 +45,6 @@ fail() {
 }
 
 stop_case() {
-  if [ -n "$PROXY_PID" ]; then kill "$PROXY_PID" 2>/dev/null || true; PROXY_PID=; fi
   docker rm -f "$APP" "$SUPERVISOR" >/dev/null 2>&1 || true
   docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
 }
@@ -134,7 +130,7 @@ first_admin() {
   [ -n "$code" ] || fail "$case: no first-account code in the log"
   if out=$(python3 "$HERE/first_admin.py" --code "$code" "$@"); then
     echo "$out"
-    pass "$case: first administrator created through the form; a cross-site POST refused"
+    pass "$case: first administrator created through the form; cross-site POSTs refused"
   else
     echo "$out"
     local log
@@ -151,18 +147,7 @@ first_admin() {
 start_case ingress '{"allowed_hosts": []}' null
 first_admin ingress --connect 127.0.0.1:8099 --host homeassistant.local:8123 --base "$INGRESS_PATH" --frame
 
-# 2. Ingress, from the gateway: the same relay, run on this host.
-start_case ingress-gateway '{"allowed_hosts": []}' null
-APP_URL="http://$APP_IP:8000" SUPERVISOR_TOKEN=unused LISTEN=127.0.0.1:8098 \
-  python3 "$HERE/ingress.py" proxy &
-PROXY_PID=$!
-for _ in $(seq 1 20); do
-  if python3 -c 'import socket; socket.create_connection(("127.0.0.1", 8098), 1)' 2>/dev/null; then break; fi
-  sleep 0.5
-done
-first_admin ingress-gateway --connect 127.0.0.1:8098 --host homeassistant.local:8123 --base "$INGRESS_PATH" --frame
-
-# 3. The port published on the host, without Ingress.
+# 2. The port published on the host, without Ingress.
 start_case port '{"allowed_hosts": ["localhost"]}' '{"8000/tcp": 8000}'
 first_admin port --connect 127.0.0.1:8000 --host localhost:8000
 

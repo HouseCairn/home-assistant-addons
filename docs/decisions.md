@@ -445,12 +445,14 @@ builds the app for `linux/amd64` on every pull request that changes
   page: GET, then POST of the form with the cookies of the page, `Origin` and
   `Referer` as the Fetch standard sets them under the page's referrer policy,
   and `Sec-Fetch-*`; the administrator must be created (302 to the instance's
-  overview, which then opens signed in), and the same POST marked as coming
-  from another site must be refused;
-- three ways in, each from an empty `/data` so the migrations run each time:
-  Ingress relayed from the Supervisor's address (`172.30.32.2`), Ingress
-  relayed from the network's gateway (`172.30.32.1`, where Core, on the host
-  network, comes from), and the published port;
+  overview, which then opens signed in), and the same POST sent by another
+  site (`Sec-Fetch-Site: cross-site`, its own origin or `null`), with the
+  page's cookie and token, must be refused;
+- two ways in, each from an empty `/data` so the migrations run each time:
+  Ingress, relayed from the Supervisor's address (`172.30.32.2`, the app's
+  peer; Core's address, `172.30.32.1`, is the last entry of
+  `X-Forwarded-For`, which HouseCairn logs as the client), and the published
+  port;
 - it fails when the app does not become healthy, when a migration fails or
   when the form is refused. A negative control runs the same test on the app
   with a migration broken on purpose (`tests/start/broken.Dockerfile`), which
