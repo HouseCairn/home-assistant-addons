@@ -3,6 +3,12 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## 0.4.1
+
+Built from `ghcr.io/housecairn/housecairn:0.4.1`, a release of Housecairn. Read
+its [release notes](https://github.com/HouseCairn/housecairn/releases/tag/v0.4.1)
+before updating, and make a backup that includes the app, as for every update.
+
 ## 0.4.0
 
 Built from `ghcr.io/housecairn/housecairn:0.4.0`, a release of Housecairn. Read
