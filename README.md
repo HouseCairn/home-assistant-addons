@@ -1,8 +1,24 @@
 # Housecairn apps for Home Assistant
 
-Run [Housecairn](https://github.com/HouseCairn/housecairn), the self-hosted
-planner for home maintenance and renovation work, as a Home Assistant app
-(formerly "add-on"), opened from Home Assistant's sidebar.
+**Plan your home's maintenance and renovation work, room by room.**
+
+[Housecairn](https://github.com/HouseCairn/housecairn) keeps the list of everything your house needs, from recurring upkeep
+such as the smoke detector battery to projects such as repainting the living
+room. For each job it knows the room, the date, the supplies and the planned
+cost, and anyone in the household marks it done in one tap. It is free software
+that you host yourself, works on its own, and connects to Home Assistant if you
+use it.
+
+This repository runs Housecairn as a Home Assistant app (formerly "add-on"),
+opened from Home Assistant's sidebar: no other server to keep. For example,
+from the sidebar:
+
+- test the smoke detector every six months, without remembering the last time;
+- clean the ventilation filter every three months, with a warning when the
+  spare filters run low;
+- book the yearly boiler service, with the boiler's model and warranty at hand;
+- repaint the living room, with its quotes and its budget, planned, committed
+  and paid.
 
 [![Lint](https://github.com/HouseCairn/home-assistant-addons/actions/workflows/lint.yaml/badge.svg?branch=main)](https://github.com/HouseCairn/home-assistant-addons/actions/workflows/lint.yaml?query=branch%3Amain)
 [![Release](https://img.shields.io/github/v/release/HouseCairn/home-assistant-addons)](https://github.com/HouseCairn/home-assistant-addons/releases)
@@ -125,6 +141,18 @@ and this repository's [docs/decisions.md](docs/decisions.md).
 
 Housecairn is developed with an AI coding agent, under human review; each pull
 request states which AI tool and model were used.
+
+## The Housecairn repositories
+
+- [housecairn](https://github.com/HouseCairn/housecairn): the web application, to install first.
+- [home-assistant-addons](https://github.com/HouseCairn/home-assistant-addons): Housecairn as a Home Assistant app (add-on) (this repository).
+- [home-assistant-housecairn](https://github.com/HouseCairn/home-assistant-housecairn): the Home Assistant integration (HACS).
+- [housecairn-mobile](https://github.com/HouseCairn/housecairn-mobile): the phone app for iOS and Android, in development, not on the stores yet.
+- [website](https://github.com/HouseCairn/website): the site <https://housecairn.app>.
+
+Website: <https://housecairn.app>. Documentation, in English and French:
+<https://docs.housecairn.app>.
+
 
 ## License
 
