@@ -33,6 +33,18 @@ INGRESS = {
     "HOUSECAIRN_BEHIND_TLS_PROXY": "true",
     "HOUSECAIRN_ALLOW_SAME_ORIGIN_FRAMING": "true",
 }
+# The app's names on the Supervisor's network, as the Supervisor returns them
+# for an app of a repository added by URL (a hash of the URL as prefix).
+HOSTNAME = "a0d7b954-housecairn"
+DNS = [f"{HOSTNAME}.local.hass.io"]
+
+
+def info(network: object, **extra: object) -> dict:
+    return {"result": "ok", "data": {"slug": HOSTNAME.replace("-", "_"), "network": network, **extra}}
+
+
+def full_info(network: object) -> dict:
+    return info(network, hostname=HOSTNAME, dns=DNS)
 
 
 def env_of(options: dict, base: dict | None = None) -> dict[str, str]:
@@ -275,8 +287,105 @@ class HostNameTests(unittest.TestCase):
         self.assertEqual(env_of({})["ALLOWED_HOSTS"], "*")
 
 
-def info(network: object) -> dict:
-    return {"result": "ok", "data": {"slug": "housecairn", "network": network}}
+class InternalHostTests(unittest.TestCase):
+    """The internal name is always accepted, the port published or not (D10, D15)."""
+
+    INTERNAL = [HOSTNAME, *DNS]
+
+    def test_published_port_adds_the_internal_names_after_the_option(self) -> None:
+        env = run.environment_from_options(
+            {"allowed_hosts": ["homeassistant.local", "192.0.2.10"]}, {}, True, self.INTERNAL
+        )
+        self.assertEqual(
+            env["ALLOWED_HOSTS"], f"homeassistant.local,192.0.2.10,{HOSTNAME},{HOSTNAME}.local.hass.io"
+        )
+
+    def test_a_name_already_listed_is_not_repeated(self) -> None:
+        env = run.environment_from_options({"allowed_hosts": [HOSTNAME.upper()]}, {}, True, self.INTERNAL)
+        self.assertEqual(env["ALLOWED_HOSTS"], f"{HOSTNAME.upper()},{HOSTNAME}.local.hass.io")
+
+    def test_ingress_only_still_accepts_every_name(self) -> None:
+        env = run.environment_from_options({}, {}, False, self.INTERNAL)
+        self.assertEqual(env["ALLOWED_HOSTS"], "*")
+
+    def test_not_asked_is_unchanged(self) -> None:
+        self.assertEqual(run.environment_from_options(HOSTS, {}, None, self.INTERNAL)["ALLOWED_HOSTS"], "homeassistant.local")
+
+    def test_published_port_without_allowed_hosts_is_still_refused(self) -> None:
+        # The internal name is for Home Assistant: a browser on the port needs the names of the option.
+        with self.assertRaises(run.OptionError):
+            run.environment_from_options({"allowed_hosts": []}, {}, True, self.INTERNAL)
+
+    def test_the_log_names_the_internal_names_apart(self) -> None:
+        env = run.environment_from_options(HOSTS, {}, True, self.INTERNAL)
+        message = run.hosts_message(env, True, self.INTERNAL)
+        self.assertIn("(allowed_hosts): homeassistant.local, and to its name on Home Assistant's internal network", message)
+        self.assertIn(f"{HOSTNAME}, {HOSTNAME}.local.hass.io.", message)
+
+    def test_names_are_read_from_the_supervisor(self) -> None:
+        def unused() -> str:
+            raise AssertionError("the container's host name is not needed")
+
+        self.assertEqual(run.internal_names(full_info(None)["data"], unused), self.INTERNAL)
+
+    def test_the_container_host_name_stands_in_when_the_supervisor_did_not_say(self) -> None:
+        for data in (None, {}, info(None)["data"], info(None, hostname="not a name")["data"], info(None, hostname=3)["data"]):
+            with self.subTest(data=data):
+                self.assertEqual(run.internal_names(data, lambda: HOSTNAME), [HOSTNAME])
+
+    def test_names_that_are_not_host_names_are_left_out(self) -> None:
+        for own in ("", "host.example.com", "-bad", "a" * 64):
+            with self.subTest(own=own):
+                self.assertEqual(run.internal_names(None, lambda: own), [])
+
+        def failing() -> str:
+            raise OSError("no name")
+
+        self.assertEqual(run.internal_names(None, failing), [])
+        data = info(None, hostname=HOSTNAME, dns=["*", ".local.hass.io", "a b", 3, f"{HOSTNAME.upper()}", DNS[0]])["data"]
+        self.assertEqual(run.internal_names(data), self.INTERNAL)
+        self.assertEqual(run.internal_names(info(None, hostname=HOSTNAME, dns="x")["data"]), [HOSTNAME])
+
+
+class AnnounceTests(unittest.TestCase):
+    """POST /discovery: the internal address, nothing else (D15)."""
+
+    def test_the_message_holds_the_internal_name_and_port_only(self) -> None:
+        sent = []
+
+        def post(base, payload, timeout):
+            sent.append(payload)
+            return {"result": "ok", "data": {"uuid": "abc"}}
+
+        uuid = run.announce({"SUPERVISOR_TOKEN": "secret-token"}, HOSTNAME, post=post)
+        self.assertEqual(uuid, "abc")
+        self.assertEqual(sent, [{"service": "housecairn", "config": {"host": HOSTNAME, "port": 8000}}])
+        self.assertNotIn("secret-token", json.dumps(sent))
+
+    def test_retries_then_gives_up(self) -> None:
+        calls = []
+
+        def failing(base, payload, timeout):
+            calls.append(payload)
+            raise run.SupervisorError("/discovery: HTTP 403")
+
+        with self.assertRaises(run.SupervisorError):
+            run.announce({}, HOSTNAME, post=failing, pause=lambda s: None)
+        self.assertEqual(len(calls), 2)
+
+    def test_an_answer_without_uuid_is_an_error(self) -> None:
+        for answer in ([], {"result": "ok"}, {"result": "ok", "data": {}}, {"result": "ok", "data": {"uuid": ""}}):
+            with self.subTest(answer=answer), self.assertRaises(run.SupervisorError):
+                run.announce({}, HOSTNAME, post=lambda base, payload, timeout: answer, pause=lambda s: None)
+
+    def test_messages(self) -> None:
+        done = run.announce_message(HOSTNAME, None)
+        self.assertIn(f"announced to Home Assistant at http://{HOSTNAME}:8000", done)
+        failed = run.announce_message(HOSTNAME, run.SupervisorError("/discovery: HTTP 403"))
+        self.assertIn("could not announce the app to Home Assistant (/discovery: HTTP 403)", failed)
+        self.assertIn("starts anyway", failed)
+        self.assertIn(f"give it http://{HOSTNAME}:8000", failed)
+        self.assertIn("starts without announcing itself", run.announce_message(None, None))
 
 
 class PortPublishedTests(unittest.TestCase):
@@ -327,22 +436,45 @@ class PortPublishedTests(unittest.TestCase):
 
 
 class FakeSupervisor(http.server.BaseHTTPRequestHandler):
-    """Answers GET /addons/self/info with the `network` of the server, as the Supervisor."""
+    """The Supervisor's API, for the two calls of run.py.
 
-    def do_GET(self) -> None:
-        self.server.requests.append((self.path, self.headers.get("Authorization")))
-        if self.path != "/addons/self/info" or (
-            self.server.token and self.headers.get("Authorization") != f"Bearer {self.server.token}"
-        ):
-            self.send_response(403)
-            self.end_headers()
-            return
-        body = json.dumps(info(self.server.network)).encode()
-        self.send_response(200)
+    GET /addons/self/info answers the `network` of the server, with the app's
+    names; POST /discovery keeps the message and answers its uuid, unless the
+    server's `discovery` status is another one, as the Supervisor refuses a
+    service the app does not list (403).
+    """
+
+    def authorized(self) -> bool:
+        return not self.server.token or self.headers.get("Authorization") == f"Bearer {self.server.token}"
+
+    def answer(self, status: int, payload: object = None) -> None:
+        body = json.dumps(payload).encode() if payload is not None else b""
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        self.server.requests.append((self.path, self.headers.get("Authorization")))
+        if self.path != "/addons/self/info" or not self.authorized():
+            self.answer(403)
+            return
+        self.answer(200, full_info(self.server.network))
+
+    def do_POST(self) -> None:
+        self.server.requests.append((self.path, self.headers.get("Authorization")))
+        length = int(self.headers.get("Content-Length") or 0)
+        payload = json.loads(self.rfile.read(length) or b"null")
+        if self.path != "/discovery" or not self.authorized():
+            self.answer(403)
+            return
+        self.server.messages.append((self.headers.get("Content-Type"), payload))
+        status = getattr(self.server, "discovery", 200)
+        if status != 200:
+            self.answer(status, {"result": "error", "message": "refused"})
+            return
+        self.answer(200, {"result": "ok", "data": {"uuid": "0123456789abcdef0123456789abcdef"}})
 
     def log_message(self, *args) -> None:
         pass
@@ -358,6 +490,7 @@ class _UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer
 
 def serve(server) -> None:
     server.requests = []
+    server.messages = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 
@@ -411,6 +544,44 @@ class SelfInfoTests(unittest.TestCase):
     def test_without_socket_nor_token(self) -> None:
         with self.assertRaises(run.SupervisorError):
             run.self_info({}, 1.0)
+        with self.assertRaises(run.SupervisorError):
+            run.announce({}, HOSTNAME, pause=lambda s: None)
+
+    def test_announce_on_the_socket_without_a_token(self) -> None:
+        path = os.path.join(self.tmp.name, "supervisor.sock")
+        server = unix_supervisor(path, None)
+        try:
+            self.assertEqual(run.announce({"SUPERVISOR_SOCKET": path}, HOSTNAME), "0123456789abcdef0123456789abcdef")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(server.requests, [("/discovery", None)])
+        self.assertEqual(
+            server.messages,
+            [("application/json", {"service": "housecairn", "config": {"host": HOSTNAME, "port": 8000}})],
+        )
+
+    def test_announce_over_tcp_with_the_token(self) -> None:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeSupervisor)
+        server.network, server.token = None, "secret-token"
+        serve(server)
+        port = server.server_address[1]
+
+        def post(base, payload, timeout):
+            return run.supervisor_call(base, "POST", "/discovery", timeout, payload, host="127.0.0.1", port=port)
+
+        try:
+            run.announce({"SUPERVISOR_TOKEN": "secret-token"}, HOSTNAME, post=post)
+            self.assertEqual(server.requests, [("/discovery", "Bearer secret-token")])
+            # Refused, as the Supervisor refuses a service missing from `discovery`:
+            # an error that holds neither the token nor the answer.
+            server.discovery = 403
+            with self.assertRaises(run.SupervisorError) as caught:
+                run.announce({"SUPERVISOR_TOKEN": "secret-token"}, HOSTNAME, post=post, pause=lambda s: None)
+            self.assertEqual(str(caught.exception), "/discovery: HTTP 403")
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 class LoadOptionsTests(unittest.TestCase):
@@ -501,7 +672,14 @@ class MainTests(unittest.TestCase):
     def test_refuses_to_start_without_root(self) -> None:
         self.assertEqual(run.main(["run"]), 1)
 
-    def start(self, options: dict, network: object = "no supervisor", env: dict | None = None, command: str = "run"):
+    def start(
+        self,
+        options: dict,
+        network: object = "no supervisor",
+        env: dict | None = None,
+        command: str = "run",
+        discovery: int = 200,
+    ):
         """Run the script as the container does, with a fake Supervisor on a socket."""
         import subprocess
 
@@ -517,6 +695,7 @@ class MainTests(unittest.TestCase):
         if network != "no supervisor":
             path = os.path.join(tmp.name, "supervisor.sock")
             self.server = unix_supervisor(path, network)
+            self.server.discovery = discovery
             self.addCleanup(self.server.server_close)
             self.addCleanup(self.server.shutdown)
             base["SUPERVISOR_SOCKET"] = path
@@ -537,7 +716,7 @@ class MainTests(unittest.TestCase):
         uid, gid, groups, args, child_env = json.loads(out.stdout)
         self.assertEqual((uid, gid, groups), (run.APP_UID, run.APP_GID, []))
         self.assertEqual(args, ["run"])
-        self.assertEqual(child_env["ALLOWED_HOSTS"], "homeassistant.local")
+        self.assertEqual(child_env["ALLOWED_HOSTS"], f"homeassistant.local,{HOSTNAME},{DNS[0]}")
         self.assertEqual(child_env["HOUSECAIRN_DEFAULT_LANGUAGE"], "fr")
         self.assertEqual(child_env["TIME_ZONE"], "Europe/Paris")
         for name in ("SUPERVISOR_TOKEN", "SUPERVISOR_SOCKET"):
@@ -548,7 +727,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(os.stat(data / "options.json").st_uid, 0)
 
     @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
-    def test_ingress_only_start_accepts_every_name(self) -> None:
+    def test_ingress_only_start_accepts_every_name_and_announces_the_internal_address(self) -> None:
         for options in ({"allowed_hosts": []}, HOSTS):
             with self.subTest(options=options):
                 out, _ = self.start(options, network={"8000/tcp": None})
@@ -557,15 +736,32 @@ class MainTests(unittest.TestCase):
                 self.assertEqual(child_env["ALLOWED_HOSTS"], "*")
                 self.assertEqual({key: child_env[key] for key in INGRESS}, INGRESS)
                 self.assertIn("is not published on the host", out.stderr)
-                self.assertEqual(self.server.requests, [("/addons/self/info", None)])
+                self.assertEqual(self.server.requests, [("/addons/self/info", None), ("/discovery", None)])
+                self.assertEqual(
+                    self.server.messages,
+                    [("application/json", {"service": "housecairn", "config": {"host": HOSTNAME, "port": 8000}})],
+                )
+                self.assertIn(f"announced to Home Assistant at http://{HOSTNAME}:8000", out.stderr)
 
     @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
     def test_published_port_start_keeps_allowed_hosts_and_names_the_option(self) -> None:
         out, _ = self.start({"allowed_hosts": ["homeassistant.local", "192.0.2.10"]}, network={"8000/tcp": 8000})
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], "homeassistant.local,192.0.2.10")
-        self.assertIn("homeassistant.local, 192.0.2.10", out.stderr)
+        self.assertEqual(
+            json.loads(out.stdout)[4]["ALLOWED_HOSTS"], f"homeassistant.local,192.0.2.10,{HOSTNAME},{DNS[0]}"
+        )
+        self.assertIn(f"homeassistant.local, 192.0.2.10, and to its name on Home Assistant's internal network, {HOSTNAME}", out.stderr)
         self.assertIn("add that name to Host names", out.stderr)
+        self.assertEqual(len(self.server.messages), 1)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_a_refused_announcement_does_not_stop_the_start(self) -> None:
+        out, data = self.start(HOSTS, network={"8000/tcp": 8000}, discovery=403)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], f"homeassistant.local,{HOSTNAME},{DNS[0]}")
+        self.assertIn("could not announce the app to Home Assistant (/discovery: HTTP 403)", out.stderr)
+        self.assertIn(f"give it http://{HOSTNAME}:8000", out.stderr)
+        self.assertEqual(os.stat(data).st_uid, run.APP_UID)
 
     @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
     def test_published_port_without_allowed_hosts_stops_before_anything_changes(self) -> None:
@@ -574,13 +770,17 @@ class MainTests(unittest.TestCase):
         self.assertIn("allowed_hosts (Host names)", out.stderr)
         self.assertEqual(out.stdout, "")
         self.assertEqual(os.stat(data).st_uid, 0)
+        self.assertEqual(self.server.messages, [])
 
     @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
     def test_no_answer_from_the_supervisor_counts_as_a_published_port(self) -> None:
         out, _ = self.start(HOSTS)  # neither socket nor token
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], "homeassistant.local")
+        # The container's own host name stands in for the Supervisor's answer.
+        own = run.internal_names(None)
+        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], ",".join(["homeassistant.local", *own]))
         self.assertIn("could not ask the Supervisor", out.stderr)
+        self.assertIn("could not announce" if own else "starts without announcing itself", out.stderr)
         out, data = self.start({"allowed_hosts": []})
         self.assertEqual(out.returncode, 2)
         self.assertEqual(os.stat(data).st_uid, 0)
@@ -599,6 +799,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(out.returncode, 2)
         self.assertIn("allowed_hosts", out.stderr)
         self.assertEqual(os.stat(data).st_uid, 0)
+        self.assertEqual(self.server.messages, [])
 
 
 if __name__ == "__main__":

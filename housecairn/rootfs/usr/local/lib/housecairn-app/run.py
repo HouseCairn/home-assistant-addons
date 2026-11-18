@@ -10,7 +10,10 @@ the two, then gets out of the way:
    then add those of Ingress (the path prefix from X-Ingress-Path, trusted
    from the Supervisor only, and frames of the same origin allowed); on
    `run`, ask the Supervisor whether the app's port is published on the host,
-   which decides the host names HouseCairn accepts (D10);
+   which decides the host names HouseCairn accepts (D10), and the app's
+   name on the Supervisor's internal network, which is always accepted;
+   then announce that internal address to Home Assistant (discovery, D15),
+   which never stops the start when it fails;
 2. give /data and what is in it to 10001:10001 (the Supervisor creates the
    folder, and restores backups, as root), except options.json;
 3. drop root for good (groups, group, user) and replace itself with
@@ -49,7 +52,8 @@ APP_GID = 10001
 # HouseCairn's entry point, with the Python of its virtual environment.
 ENTRYPOINT = ("/app/.venv/bin/python", "-m", "housecairn.entrypoint")
 # Never passed to HouseCairn: the Supervisor's API tokens and socket path
-# (HouseCairn does not call the Supervisor; this script does, once, D10),
+# (HouseCairn does not call the Supervisor; this script does, at start, D10
+# and D15),
 # SECRET_KEY, which HouseCairn generates once in
 # /data/secret_key when the variable is unset, and a fixed path prefix, which
 # would limit the cookies to a path the Ingress addresses do not share (D9).
@@ -72,6 +76,20 @@ DROPPED_VARIABLES = (
 APP_PORT = "8000/tcp"
 SUPERVISOR_HOST = "supervisor"
 SELF_INFO = "/addons/self/info"
+
+# Discovery (D15). The app tells Home Assistant where to reach it on the
+# Supervisor's internal network, so that the Housecairn integration finds it
+# without asking anyone for an address. Any app may call /discovery without
+# `hassio_api` (`api_bypass` in supervisor/api/middleware/security.py, and
+# "Apps can call some API commands without needing to set `hassio_api: true`"
+# in the developer documentation, Communication), for a service it lists in
+# `discovery` of its config.yaml (`set_discovery` in supervisor/api/discovery.py
+# refuses any other). The message holds the internal name and port, nothing
+# secret: the Supervisor keeps it, and passes it to Home Assistant Core.
+DISCOVERY = "/discovery"
+DISCOVERY_SERVICE = "housecairn"
+# HouseCairn's web server in the container, the target of ingress as well.
+INTERNAL_PORT = 8000
 
 # The Supervisor's address on its internal network: every Ingress request
 # reaches the app from there ("Your web server only ever sees requests from
@@ -168,7 +186,9 @@ def _hosts(options: Mapping[str, Any]) -> list[str]:
     return hosts
 
 
-def allowed_hosts(options: Mapping[str, Any], port_published: bool | None) -> str:
+def allowed_hosts(
+    options: Mapping[str, Any], port_published: bool | None, internal: Sequence[str] = ()
+) -> str:
     """ALLOWED_HOSTS of HouseCairn, from whether the port is published (D10).
 
     - Port not published: HouseCairn is only reached from the Supervisor's
@@ -177,7 +197,8 @@ def allowed_hosts(options: Mapping[str, Any], port_published: bool | None) -> st
       accepted (`*`) and allowed_hosts is not used.
     - Port published: anyone on the network may reach it, so it answers only
       to the names of allowed_hosts, through ingress as on the port; at least
-      one is needed.
+      one is needed. The app's `internal` names on the Supervisor's network,
+      the address Home Assistant uses (D15), are always added after them.
     - None, not asked (healthcheck, manage, backup): the names of the option,
       else `*`. The healthcheck only needs one name the server accepts.
     """
@@ -191,10 +212,13 @@ def allowed_hosts(options: Mapping[str, Any], port_published: bool | None) -> st
             "empty: add the names and addresses you use to reach Home Assistant and the port, "
             "such as homeassistant.local or 192.0.2.10, or remove the port number."
         )
+    if port_published:
+        listed = {host.lower() for host in hosts}
+        hosts += [name for name in internal if name.lower() not in listed]
     return ",".join(hosts) or "*"
 
 
-def hosts_message(env: Mapping[str, str], port_published: bool) -> str:
+def hosts_message(env: Mapping[str, str], port_published: bool, internal: Sequence[str] = ()) -> str:
     """What the log says at start about the host names accepted (D10)."""
     if not port_published:
         return (
@@ -202,30 +226,41 @@ def hosts_message(env: Mapping[str, str], port_published: bool) -> str:
             "ingress only and accepts every host name there. Host names (allowed_hosts) is only "
             "used once the port is published."
         )
+    inside = {name.lower() for name in internal}
+    names = [host for host in env["ALLOWED_HOSTS"].split(",") if host.lower() not in inside]
+    also = (
+        f", and to its name on Home Assistant's internal network, {', '.join(internal)}"
+        if internal
+        else ""
+    )
     return (
         f"the port {APP_PORT} is published on the host: through ingress and on the port, "
         "Housecairn answers only to the names of Host names (allowed_hosts): "
-        f"{env['ALLOWED_HOSTS'].replace(',', ', ')}. A browser that uses another name or address "
+        f"{', '.join(names)}{also}. A browser that uses another name or address "
         'gets "Bad request" (400) and this log shows "Invalid HTTP_HOST header": add that name '
         "to Host names on the Configuration tab, then restart the app."
     )
 
 
 def environment_from_options(
-    options: Mapping[str, Any], base: Mapping[str, str], port_published: bool | None = None
+    options: Mapping[str, Any],
+    base: Mapping[str, str],
+    port_published: bool | None = None,
+    internal: Sequence[str] = (),
 ) -> dict[str, str]:
     """The environment of HouseCairn: `base`, less the dropped variables, plus the options.
 
     An option left empty sets nothing, so the setting keeps its default and,
     for the settings HouseCairn also offers in its interface, stays editable
     there (a variable that is set locks its field). `port_published` decides
-    ALLOWED_HOSTS (`allowed_hosts`).
+    ALLOWED_HOSTS (`allowed_hosts`), to which the app's `internal` names are
+    added once the port is published.
     """
     env = {key: value for key, value in base.items() if key not in DROPPED_VARIABLES}
     # The home of user 10001 in HouseCairn's image; root's would not be readable.
     env["HOME"] = "/nonexistent"
 
-    env["ALLOWED_HOSTS"] = allowed_hosts(options, port_published)
+    env["ALLOWED_HOSTS"] = allowed_hosts(options, port_published, internal)
 
     language = _text(options, "default_language")
     if language:
@@ -404,13 +439,20 @@ class _UnixConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
-def self_info(
-    base: Mapping[str, str], timeout: float, host: str = SUPERVISOR_HOST, port: int = 80
+def supervisor_call(
+    base: Mapping[str, str],
+    method: str,
+    path: str,
+    timeout: float,
+    payload: Any = None,
+    host: str = SUPERVISOR_HOST,
+    port: int = 80,
 ) -> Any:
-    """The app's own information from the Supervisor, as parsed JSON.
+    """One call to the Supervisor's API, its answer as parsed JSON.
 
     On the socket when the Supervisor mounts one, else, or if it fails, on the
-    internal network with the token when there is one.
+    internal network with the token when there is one. `payload` is sent as
+    JSON.
     """
     socket_path = base.get("SUPERVISOR_SOCKET", "").strip()
     token = base.get("SUPERVISOR_TOKEN", "").strip()
@@ -418,50 +460,67 @@ def self_info(
         raise SupervisorError("neither SUPERVISOR_SOCKET nor SUPERVISOR_TOKEN is set")
     if socket_path:
         try:
-            return _get_json(_UnixConnection(socket_path, timeout), {})
+            return _call(_UnixConnection(socket_path, timeout), method, path, {}, payload)
         except SupervisorError:
             if not token:
                 raise
-    return _get_json(
+    return _call(
         http.client.HTTPConnection(host, port, timeout=timeout),
+        method,
+        path,
         {"Authorization": f"Bearer {token}"},
+        payload,
     )
 
 
-def _get_json(conn: http.client.HTTPConnection, headers: dict[str, str]) -> Any:
+def self_info(
+    base: Mapping[str, str], timeout: float, host: str = SUPERVISOR_HOST, port: int = 80
+) -> Any:
+    """The app's own information from the Supervisor, as parsed JSON."""
+    return supervisor_call(base, "GET", SELF_INFO, timeout, host=host, port=port)
+
+
+def _call(
+    conn: http.client.HTTPConnection,
+    method: str,
+    path: str,
+    headers: dict[str, str],
+    payload: Any,
+) -> Any:
     headers = {"Accept": "application/json", **headers}
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
     try:
-        conn.request("GET", SELF_INFO, headers=headers)
+        conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
-        body = response.read()
+        answer = response.read()
     except (OSError, http.client.HTTPException) as exc:
-        raise SupervisorError(f"{SELF_INFO}: {exc.__class__.__name__}") from None
+        raise SupervisorError(f"{path}: {exc.__class__.__name__}") from None
     finally:
         conn.close()
     # Never the body in a message: the app's information holds its options.
     if response.status != 200:
-        raise SupervisorError(f"{SELF_INFO}: HTTP {response.status}")
+        raise SupervisorError(f"{path}: HTTP {response.status}")
     try:
-        return json.loads(body)
+        return json.loads(answer)
     except ValueError:
-        raise SupervisorError(f"{SELF_INFO}: not JSON") from None
+        raise SupervisorError(f"{path}: not JSON") from None
 
 
-def port_published(
+def app_info(
     base: Mapping[str, str],
     *,
     fetch: Callable[[Mapping[str, str], float], Any] = self_info,
     attempts: int = 3,
     timeout: float = 5.0,
     pause: Callable[[float], None] = time.sleep,
-) -> bool:
-    """Whether the Supervisor publishes the app's port on the host (D10).
+) -> dict[str, Any]:
+    """`data` of the app's own information, after up to `attempts` tries.
 
-    `network` in the app's information maps each port of the container to its
-    port on the host, `null` when it is not published; `network` itself is
-    `null` for an app without ports. A malformed answer, or none after
-    `attempts`, raises SupervisorError: the caller then answers as if the port
-    were published, the stricter case.
+    Raises SupervisorError when there is no answer, or when it holds no
+    mapping of data.
     """
     error = SupervisorError("no attempt")
     for attempt in range(attempts):
@@ -473,20 +532,148 @@ def port_published(
             error = exc
             continue
         data = info.get("data") if isinstance(info, dict) else None
-        if not isinstance(data, dict) or "network" not in data:
-            raise SupervisorError(f"{SELF_INFO}: no network in the answer")
-        network = data["network"]
-        if network is None:
-            return False
-        if not isinstance(network, dict):
-            raise SupervisorError(f"{SELF_INFO}: network is not a mapping")
-        host_port = network.get(APP_PORT)
-        if host_port is None:
-            return False
-        if isinstance(host_port, bool) or not isinstance(host_port, int):
-            raise SupervisorError(f"{SELF_INFO}: the host port of {APP_PORT} is not a number")
-        return True
+        if not isinstance(data, dict):
+            raise SupervisorError(f"{SELF_INFO}: no data in the answer")
+        return data
     raise error
+
+
+def published_in(data: Mapping[str, Any]) -> bool:
+    """Whether the Supervisor publishes the app's port on the host (D10).
+
+    `network` in the app's information maps each port of the container to its
+    port on the host, `null` when it is not published; `network` itself is
+    `null` for an app without ports. A malformed answer raises
+    SupervisorError: the caller then answers as if the port were published,
+    the stricter case.
+    """
+    if "network" not in data:
+        raise SupervisorError(f"{SELF_INFO}: no network in the answer")
+    network = data["network"]
+    if network is None:
+        return False
+    if not isinstance(network, dict):
+        raise SupervisorError(f"{SELF_INFO}: network is not a mapping")
+    host_port = network.get(APP_PORT)
+    if host_port is None:
+        return False
+    if isinstance(host_port, bool) or not isinstance(host_port, int):
+        raise SupervisorError(f"{SELF_INFO}: the host port of {APP_PORT} is not a number")
+    return True
+
+
+def port_published(
+    base: Mapping[str, str],
+    *,
+    fetch: Callable[[Mapping[str, str], float], Any] = self_info,
+    attempts: int = 3,
+    timeout: float = 5.0,
+    pause: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Whether the port is published, from the app's information (D10)."""
+    return published_in(app_info(base, fetch=fetch, attempts=attempts, timeout=timeout, pause=pause))
+
+
+def internal_names(
+    data: Mapping[str, Any] | None, gethostname: Callable[[], str] = socket.gethostname
+) -> list[str]:
+    """The app's names on the Supervisor's internal network, the first to announce (D15).
+
+    The Supervisor names each app on its network after its slug, with the
+    prefix of its repository (`hostname` of the app, `slug.replace("_", "-")`
+    in supervisor/apps/model.py), gives the container that host name
+    (supervisor/docker/app.py), registers it in its DNS with the suffix
+    `local.hass.io` (`dns` of the app), and returns both in the app's own
+    information. They are read there; when the Supervisor did not answer, the
+    container's own host name, which the Supervisor set, stands in for the
+    first. A name that is not a host name is left out; none, an empty list.
+    """
+    names: list[str] = []
+    hostname = data.get("hostname") if data else None
+    if not isinstance(hostname, str) or not re.fullmatch(_LABEL, hostname):
+        hostname = None
+        try:
+            own = gethostname()
+        except OSError:
+            own = ""
+        if isinstance(own, str) and re.fullmatch(_LABEL, own):
+            hostname = own
+    if hostname:
+        names.append(hostname)
+    dns = data.get("dns") if data else None
+    for name in dns if isinstance(dns, list) else []:
+        if (
+            isinstance(name, str)
+            and HOST.fullmatch(name)
+            and not name.startswith(".")
+            and name.lower() not in {known.lower() for known in names}
+        ):
+            names.append(name)
+    return names
+
+
+def post_discovery(base: Mapping[str, str], payload: dict[str, Any], timeout: float) -> Any:
+    """POST /discovery to the Supervisor, its answer as parsed JSON."""
+    return supervisor_call(base, "POST", DISCOVERY, timeout, payload)
+
+
+def announce(
+    base: Mapping[str, str],
+    host: str,
+    *,
+    post: Callable[[Mapping[str, str], dict[str, Any], float], Any] = post_discovery,
+    attempts: int = 2,
+    timeout: float = 5.0,
+    pause: Callable[[float], None] = time.sleep,
+) -> str:
+    """Announce the app's internal address to Home Assistant; return the message's id (D15).
+
+    The Supervisor keeps one message per app and service, and sends it on to
+    Home Assistant when it changes or when Home Assistant may have missed it:
+    the same message at each start is no duplicate. Raises SupervisorError
+    when no attempt succeeded.
+    """
+    payload = {
+        "service": DISCOVERY_SERVICE,
+        "config": {"host": host, "port": INTERNAL_PORT},
+    }
+    error = SupervisorError("no attempt")
+    for attempt in range(attempts):
+        if attempt:
+            pause(1.0)
+        try:
+            answer = post(base, payload, timeout)
+        except SupervisorError as exc:
+            error = exc
+            continue
+        data = answer.get("data") if isinstance(answer, dict) else None
+        uuid = data.get("uuid") if isinstance(data, dict) else None
+        if not isinstance(uuid, str) or not uuid:
+            raise SupervisorError(f"{DISCOVERY}: no uuid in the answer")
+        return uuid
+    raise error
+
+
+def announce_message(host: str | None, error: SupervisorError | None) -> str:
+    """What the log says at start about the announcement to Home Assistant (D15)."""
+    if not host:
+        return (
+            "could not read the app's name on Home Assistant's internal network: Housecairn "
+            "starts without announcing itself, and the Housecairn integration asks for its "
+            "address."
+        )
+    address = f"http://{host}:{INTERNAL_PORT}"
+    if error is not None:
+        return (
+            f"could not announce the app to Home Assistant ({error}): Housecairn starts anyway. "
+            f"The Housecairn integration then asks for the address: give it {address}."
+        )
+    return (
+        f"announced to Home Assistant at {address}, its address on Home Assistant's internal "
+        "network: the Housecairn integration finds it there (Settings > Devices & services)."
+    )
+
+
 
 
 def fix_ownership(
@@ -542,23 +729,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         log("must start as root, to read the options and prepare /data; it then runs as 10001.")
         return 1
     published: bool | None = None
+    internal: list[str] = []
     try:
         options = load_options(OPTIONS_FILE)
         if args[0] == "run":
+            info: dict[str, Any] | None = None
             try:
-                published = port_published(os.environ)
+                info = app_info(os.environ)
+                published = published_in(info)
             except SupervisorError as exc:
                 log(
                     f"could not ask the Supervisor whether the port is published ({exc}): "
                     "answering as if it were."
                 )
                 published = True
-        env = environment_from_options(options, os.environ, published)
+            internal = internal_names(info)
+        env = environment_from_options(options, os.environ, published, internal)
     except OptionError as exc:
         log(str(exc))
         return 2
     if published is not None:
-        log(hosts_message(env, published))
+        log(hosts_message(env, published, internal))
+    if args[0] == "run":
+        # Never a reason not to start: the integration can still be given the address.
+        failure: SupervisorError | None = None
+        if internal:
+            try:
+                announce(os.environ, internal[0])
+            except SupervisorError as exc:
+                failure = exc
+            except Exception as exc:  # noqa: BLE001 (whatever it is, Housecairn starts)
+                failure = SupervisorError(f"{DISCOVERY}: {exc.__class__.__name__}")
+        log(announce_message(internal[0] if internal else None, failure))
     if args[0] != "healthcheck":
         changed = fix_ownership(DATA_DIR, APP_UID, APP_GID, skip=[OPTIONS_FILE])
         if changed:

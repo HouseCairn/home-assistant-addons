@@ -1,8 +1,9 @@
 """A stand-in for Home Assistant's Ingress and the Supervisor, for the start test (D14).
 
   ingress.py supervisor   in a container at 172.30.32.2, alias `supervisor`: answers
-                          GET /addons/self/info on port 80 (what run.py asks, D10),
-                          and relays Ingress on port 8099
+                          GET /addons/self/info and POST /discovery on port 80 (what
+                          run.py asks and sends, D10 and D15), and relays Ingress on
+                          port 8099
 
 The app sees the Supervisor, 172.30.32.2, as its peer, and Core's address,
 172.30.32.1, as the last entry of X-Forwarded-For: HouseCairn takes that entry
@@ -10,7 +11,9 @@ as the client address (`core/proxy.py`), the one its log shows.
 
 Environment: APP_URL (http://<app address>:8000), SUPERVISOR_TOKEN (the token
 the app was given), NETWORK (JSON: `null`, or {"8000/tcp": 8000} when the port
-is published), LISTEN (address:port of Ingress, 0.0.0.0:8099 by default).
+is published), APP_HOSTNAME (the app's host name on the network), DISCOVERY
+(JSON: `discovery` of config.yaml), LISTEN (address:port of Ingress,
+0.0.0.0:8099 by default).
 
 Ingress is relayed as Home Assistant does it, in one hop instead of two (Core,
 then the Supervisor), with the header handling of both copied from their code
@@ -156,25 +159,73 @@ class Ingress(BaseHTTPRequestHandler):
 
 
 class SelfInfo(BaseHTTPRequestHandler):
-    """GET /addons/self/info, as the Supervisor answers an app with its token."""
+    """The Supervisor's API for an app with its token: its own information, and discovery.
+
+    GET /addons/self/info answers `network`, and the app's `hostname` and
+    `dns` (supervisor/api/apps.py, `info_data`). POST /discovery checks, as
+    `set_discovery` in supervisor/api/discovery.py does, that the service is
+    one of `discovery` in the app's config.yaml (DISCOVERY, a JSON list), else
+    answers 403; it logs the message it accepts, which the test reads.
+    """
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         sys.stderr.write("supervisor: " + format % args + "\n")
 
-    def do_GET(self) -> None:  # noqa: N802
-        if self.path != "/addons/self/info":
-            self.send_error(404)
-            return
+    def authorized(self) -> bool:
         if self.headers.get("Authorization") != f"Bearer {os.environ['SUPERVISOR_TOKEN']}":
             self.send_error(401)
-            return
-        network = json.loads(os.environ.get("NETWORK", "null"))
-        body = json.dumps({"result": "ok", "data": {"slug": "housecairn", "network": network}}).encode()
+            return False
+        return True
+
+    def answer(self, payload: object) -> None:
+        body = json.dumps(payload).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path != "/addons/self/info":
+            self.send_error(404)
+            return
+        if not self.authorized():
+            return
+        network = json.loads(os.environ.get("NETWORK", "null"))
+        hostname = os.environ["APP_HOSTNAME"]
+        self.answer(
+            {
+                "result": "ok",
+                "data": {
+                    "slug": hostname.replace("-", "_"),
+                    "hostname": hostname,
+                    "dns": [f"{hostname}.local.hass.io"],
+                    "network": network,
+                },
+            }
+        )
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path != "/discovery":
+            self.send_error(404)
+            return
+        if not self.authorized():
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            message = json.loads(self.rfile.read(length))
+            service, config = message["service"], message["config"]
+        except (ValueError, KeyError, TypeError):
+            self.send_error(400)
+            return
+        if not isinstance(service, str) or not isinstance(config, dict):
+            self.send_error(400)
+            return
+        if service not in json.loads(os.environ.get("DISCOVERY", "[]")):
+            self.send_error(403, "Apps must list services they provide via discovery in their config!")
+            return
+        sys.stderr.write(f"supervisor: discovery {json.dumps(message, sort_keys=True)}\n")
+        self.answer({"result": "ok", "data": {"uuid": "0123456789abcdef0123456789abcdef"}})
 
 
 def main() -> int:

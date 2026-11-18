@@ -37,7 +37,7 @@ change it here.
 
 | Option | What it does |
 | --- | --- |
-| Host names (`allowed_hosts`) | **Only used when [the port](#the-port) is open**, and then required. The names and addresses you type in the browser to reach Home Assistant and the port, such as `homeassistant.local` or `192.0.2.10`, one per line, including those of remote access (such as `ha.example.com`): Housecairn then refuses any other, through ingress as on the port. Through ingress alone, leave it empty: every name is accepted (see [Host names](#host-names)). An IPv6 address goes in brackets: `[2001:db8::1]`. `*` is refused. |
+| Host names (`allowed_hosts`) | **Only used when [the port](#the-port) is open**, and then required. The names and addresses you type in the browser to reach Home Assistant and the port, such as `homeassistant.local` or `192.0.2.10`, one per line, including those of remote access (such as `ha.example.com`): Housecairn then refuses any other, through ingress as on the port, except its own internal name, which [the integration](#the-housecairn-integration) uses and which you do not add. Through ingress alone, leave it empty: every name is accepted (see [Host names](#host-names)). An IPv6 address goes in brackets: `[2001:db8::1]`. `*` is refused. |
 | Default language (`default_language`) | `en` or `fr`, for browsers that ask for no language Housecairn offers. |
 | Time zone (`time_zone`) | Such as `Europe/Paris`: it decides what "today" is. Empty: the time zone of Home Assistant. |
 | Open sign-up (`signup_open`) | Lets anyone create an account from the sign-up page. Leave it off: it needs outgoing email and HTTPS (see [Limits](#limits)). Housecairn does not start with open sign-up and no outgoing email server configured, and the email settings are in its administration screens, which need a first administrator: leave it off at first. |
@@ -132,6 +132,31 @@ without the ingress path, which leads nowhere; created on the port, they hold
 the port's address. Reminders and report alerts, sent in the background, carry
 no link at all.
 
+## The Housecairn integration
+
+The [Housecairn integration](https://github.com/HouseCairn/home-assistant-housecairn)
+brings Housecairn's tasks into Home Assistant. **It finds the app by itself**:
+at each start, the app tells Home Assistant its address on Home Assistant's
+internal network, and Home Assistant offers to set up the integration under
+**Settings** > **Devices & services**, without asking for an address.
+
+- **Only that internal address is used**, such as
+  `http://a0d7b954-housecairn:8000`: the name of the app on Home Assistant's
+  internal network, and Housecairn's port in the app. It is plain HTTP on a
+  network that never leaves the device, and it works with [the
+  port](#the-port) closed. It is not an address for a browser: keep using
+  ingress, or the port.
+- **It is always accepted**, even when the port is open and **Host names**
+  lists only the names of your browsers (see [Host names](#host-names)).
+- **The Log tab says what happened**, at each start: `announced to Home
+  Assistant at http://<name>:8000`, or why it could not, with that address to
+  give the integration by hand. Housecairn starts either way.
+- The announcement holds that address and nothing else. The app needs no
+  extra access to Home Assistant or to the Supervisor for it.
+- A version of the integration that does not read the announcement yet still
+  asks for an address: give it this internal address, not the address of the
+  sidebar.
+
 ## The port
 
 Housecairn can also be opened on a port of the host, in plain HTTP, for the
@@ -165,8 +190,10 @@ the port is open, and the **Log** tab says what it decided:
   Assistant's sign-in. It accepts **every name**, and **Host names** is not
   used.
 - **Port open**: anyone on your network can reach it, so it answers **only to
-  the names of Host names**, through ingress as on the port. The app does not
-  start while the list is empty, and says so in the log.
+  the names of Host names**, through ingress as on the port, and to its own
+  name on Home Assistant's internal network, for [the
+  integration](#the-housecairn-integration). The app does not start while
+  the list is empty, and says so in the log.
 
 A name that is not in the list gets a **Bad request** (400) page, and the
 **Log** tab shows `Invalid HTTP_HOST header: '<name>'`: add that name to

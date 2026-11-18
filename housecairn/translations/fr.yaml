@@ -5,8 +5,9 @@ configuration:
       Seulement si le port 8000/tcp est ouvert (Réseau) : les noms et adresses
       que vous tapez pour joindre Home Assistant et le port, comme
       homeassistant.local ou 192.0.2.10, accès à distance compris ; Housecairn
-      refuse alors tout autre nom. Par l'ingress seul, laissez vide : tout nom
-      est accepté. Une adresse IPv6 s'écrit entre crochets.
+      refuse alors tout autre nom, sauf son nom interne, que l'intégration
+      utilise. Par l'ingress seul, laissez vide : tout nom est accepté. Une
+      adresse IPv6 s'écrit entre crochets.
   default_language:
     name: Langue par défaut
     description: >-

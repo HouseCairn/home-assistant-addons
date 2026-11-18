@@ -29,6 +29,9 @@ APP=hc-start-app
 SUPERVISOR=hc-start-supervisor
 VOLUME=hc-start-data
 APP_IP=172.30.33.10
+# The app's host name on the Supervisor's network: the slug with the prefix of
+# its repository (`hostname` of supervisor/apps/model.py).
+APP_HOSTNAME=a0d7b954-housecairn
 TOKEN=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 INGRESS_PATH=/api/hassio_ingress/$TOKEN
 SUPERVISOR_TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
@@ -78,6 +81,24 @@ EOF
 )
 [ "${#ENV_ARGS[@]}" -gt 0 ] || fail "no environment read from config.yaml"
 
+# `discovery` of config.yaml, as JSON: the stand-in Supervisor refuses any
+# other service, as the real one does (D15).
+DISCOVERY=$(python3 - "$ROOT/housecairn/config.yaml" <<'EOF'
+import json, re, sys
+services, inside = [], False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if re.match(r"^discovery:\s*$", line):
+        inside = True
+        continue
+    if inside:
+        m = re.match(r"^  - ([a-z0-9_]+)\s*$", line)
+        if not m:
+            break
+        services.append(m[1])
+print(json.dumps(services))
+EOF
+)
+
 # The Supervisor's network: 172.30.32.0/23, gateway 172.30.32.1, the
 # Supervisor at .2, apps in 172.30.33.0/24 (supervisor/const.py).
 docker network create --subnet 172.30.32.0/23 --gateway 172.30.32.1 "$NETWORK" >/dev/null
@@ -100,12 +121,15 @@ os.chmod("/data/options.json", 0o600)
   docker run -d --name "$SUPERVISOR" --network "$NETWORK" --ip 172.30.32.2 --network-alias supervisor \
     --user 0 --entrypoint /usr/local/bin/python3 -v "$HERE:/start:ro" -p 127.0.0.1:8099:8099 \
     -e "APP_URL=http://$APP_IP:8000" -e "SUPERVISOR_TOKEN=$SUPERVISOR_TOKEN" -e "NETWORK=$network" \
+    -e "APP_HOSTNAME=$APP_HOSTNAME" -e "DISCOVERY=$DISCOVERY" \
     "$IMAGE" -I /start/ingress.py supervisor >/dev/null
   local ports=()
   if [ "$case" = port ]; then ports=(-p 127.0.0.1:8000:8000); fi
   # The app, as the Supervisor starts it: as root (run.py drops it), with an
-  # init, /tmp in memory (tmpfs: true), the Supervisor's token.
-  docker run -d --name "$APP" --network "$NETWORK" --ip "$APP_IP" --init --tmpfs /tmp \
+  # init, /tmp in memory (tmpfs: true), the Supervisor's token, and its host
+  # name on the network.
+  docker run -d --name "$APP" --hostname "$APP_HOSTNAME" --network "$NETWORK" --ip "$APP_IP" \
+    --init --tmpfs /tmp \
     -v "$VOLUME:/data" "${ENV_ARGS[@]}" -e TZ=Europe/Paris -e "SUPERVISOR_TOKEN=$SUPERVISOR_TOKEN" \
     "${ports[@]}" "$IMAGE" >/dev/null
 
@@ -123,6 +147,14 @@ os.chmod("/data/options.json", 0o600)
   log=$(docker logs "$APP" 2>&1)
   grep -q "applying database migrations" <<<"$log" || fail "$case: no migration in the log"
   pass "$case: the app started, migrations applied, healthy"
+  # Discovery (D15): the internal address, sent once, accepted by the Supervisor.
+  local expected sent
+  expected=$(printf '{"config": {"host": "%s", "port": 8000}, "service": "housecairn"}' "$APP_HOSTNAME")
+  sent=$(docker logs "$SUPERVISOR" 2>&1 | sed -n 's/^supervisor: discovery //p')
+  [ "$sent" = "$expected" ] || fail "$case: discovery message: expected $expected, got ${sent:-nothing}"
+  grep -q "announced to Home Assistant at http://$APP_HOSTNAME:8000" <<<"$log" \
+    || fail "$case: no announcement in the app's log"
+  pass "$case: announced to Home Assistant at http://$APP_HOSTNAME:8000"
 }
 
 first_admin() {
@@ -154,6 +186,24 @@ first_admin ingress --connect 127.0.0.1:8099 --host homeassistant.local:8123 --b
 # 2. The port published on the host, without Ingress.
 start_case port '{"allowed_hosts": ["localhost"]}' '{"8000/tcp": 8000}'
 first_admin port --connect 127.0.0.1:8000 --host localhost:8000
+
+# With the port published and Host names restricted, the internal name, which
+# Home Assistant uses (D15), is still accepted, and another name is not. Django
+# answers 400 to a name outside ALLOWED_HOSTS before any view; any other answer
+# means the name passed.
+host_status() {
+  curl -s -o /dev/null -w '%{http_code}' -H "Host: $1" http://127.0.0.1:8000/
+}
+for name in "$APP_HOSTNAME:8000" "$APP_HOSTNAME.local.hass.io:8000"; do
+  status=$(host_status "$name")
+  case "$status" in
+    400 | 000) fail "port: Host $name answered $status" ;;
+    *) echo "Host $name: $status" ;;
+  esac
+done
+status=$(host_status "other.example.com:8000")
+[ "$status" = 400 ] || fail "port: Host other.example.com answered $status, not 400"
+pass "port: the internal name is accepted with Host names restricted, another name is refused"
 
 # A clean stop, within the app's `timeout` (30 s).
 docker stop -t 30 "$APP" >/dev/null
