@@ -87,10 +87,11 @@ Each step is detailed in [DOCS.md](housecairn/DOCS.md#install).
   with a **Housecairn API token**, never with a Home Assistant token. Create it
   in Housecairn, under **More** > **Me** > **API tokens**: tick **Read** and
   **Write** (Write marks tasks done), choose the home, and copy the token,
-  which is shown once. The integration needs an address that reaches the app
-  without Home Assistant's interface, such as [the port](housecairn/DOCS.md#the-port),
-  with that name or address in **Host names**, which applies once the port is
-  open ([Host names](housecairn/DOCS.md#host-names)).
+  which is shown once. The app announces its address on Home Assistant's
+  internal network at each start, so the integration finds it by itself, the
+  port closed or open; a version of the integration that does not read the
+  announcement yet asks for that address, written in the app's **Log** tab
+  ([The Housecairn integration](housecairn/DOCS.md#the-housecairn-integration)).
 - Housecairn's own integrations (notifications, calendar feeds, API) work as in
   any other installation: see <https://docs.housecairn.app>.
 

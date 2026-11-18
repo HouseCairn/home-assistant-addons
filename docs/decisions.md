@@ -74,7 +74,7 @@ needed.
 
 | Option | Variable | When empty |
 | --- | --- | --- |
-| `allowed_hosts` | `ALLOWED_HOSTS` | `*` while the port is not published; refused once it is (D10) |
+| `allowed_hosts` | `ALLOWED_HOSTS` | `*` while the port is not published; refused once it is (D10). Once it is, the app's internal names are added to the option's (D15) |
 | `default_language` | `HOUSECAIRN_DEFAULT_LANGUAGE` | `en`, editable in the interface |
 | `time_zone` | `TIME_ZONE` | the time zone of Home Assistant (`TZ`, set by the Supervisor) |
 | `signup_open` | `HOUSECAIRN_SIGNUP_OPEN` | closed, editable in the interface |
@@ -129,8 +129,9 @@ same instance may be reached through Home Assistant in plain HTTP.
 No `map` (only the app's private `/data`, which the Supervisor always mounts),
 no host network, no added Linux capability, no device, no `hassio_api` nor
 `homeassistant_api`, protection mode left on. The start script reads the app's
-own information from the Supervisor, which every app may do without them
-(D10); HouseCairn itself never gets the Supervisor's token or socket path.
+own information from the Supervisor (D10) and sends one discovery message
+(D15), which every app may do without them; HouseCairn itself never gets the
+Supervisor's token or socket path.
 `/tmp` is in memory (`tmpfs: true`), as in HouseCairn's `compose.yaml`.
 
 AppArmor: the Supervisor applies Docker's default profile. The documentation
@@ -308,7 +309,10 @@ and nothing of the answer is logged (it holds the app's options).
 - **`8000/tcp` with a host port**: anyone on the local network may reach the
   port. `ALLOWED_HOSTS` is `allowed_hosts`, for ingress and the port alike
   (one Django setting for one server), as before; the app does not start
-  while it is empty.
+  while it is empty. The app's names on the Supervisor's internal network are
+  added after the option's (maintainer's decision, 2026-11-18, D15), so that
+  Home Assistant reaches the app by the address it announces whatever the
+  option holds.
 - **No answer** (no socket nor token, an error, an answer without `network`),
   after three attempts: the app acts as if the port were published, the
   stricter case, and says so in the log.
@@ -568,7 +572,10 @@ builds the app for `linux/amd64` on every pull request that changes
   `SUPERVISOR_TOKEN`, an init, `/tmp` in memory, on a network shaped like the
   Supervisor's (`172.30.32.0/23`, the Supervisor at `.2`, the app in
   `172.30.33.0/24`), with a stand-in Supervisor that answers
-  `/addons/self/info` (D10);
+  `/addons/self/info` (D10) and accepts on `/discovery` only the services of
+  `discovery` in `config.yaml` (D15); the message must be the app's internal
+  address, and, with the port published and **Host names** restricted, the
+  internal names must pass Django's host check and another name must not;
 - `tests/start/ingress.py` relays Ingress with the header handling of Core
   and of the Supervisor copied from their code, and Core's response headers,
   `Referrer-Policy: no-referrer` first;
@@ -606,3 +613,85 @@ The job runs on every pull request and only skips its steps when nothing the
 app is built from changed, so that it can be a required check of `main`.
 `arm64` is not started: the image is the same multi-architecture index, and
 the runner would need emulation.
+
+## D15. Discovery: the app announces its internal address to Home Assistant
+
+Maintainer's decision, 2026-11-18. When Housecairn runs as this app, the
+Housecairn integration asked for an address that nobody knows: Home Assistant
+reaches the app on the Supervisor's internal network, by the app's host name,
+not by a public address. The app now gives Home Assistant that address
+itself, through the Supervisor's discovery.
+
+**What the app sends.** At each start (`run`, not the healthcheck nor
+`manage`), after reading its own information (D10) and before HouseCairn
+starts, the start script sends one message to the Supervisor:
+
+```json
+{"service": "housecairn", "config": {"host": "<hostname of the app>", "port": 8000}}
+```
+
+on `POST /discovery`, on the Supervisor's socket or with the app's token, as
+for D10. `host` is read, not built: it is `hostname` of the app's own
+information (`GET /addons/self/info`), which the Supervisor makes of the slug
+and the prefix of the repository (`slug.replace("_", "-")`, `hostname` in
+`supervisor/apps/model.py`), gives to the container
+(`supervisor/docker/app.py`) and registers in its DNS. When the Supervisor did
+not answer, the container's own host name, which the Supervisor set, stands in.
+`port` is HouseCairn's server in the container, the target of ingress. Nothing
+else: no token, no option, no public address. Home Assistant uses plain HTTP
+on that network, which never leaves the host.
+
+**Where it goes.** The Supervisor keeps one message per app and service
+(`supervisor/discovery/__init__.py`): the same message at each start replaces
+nothing and is sent on to Home Assistant only when it changed or when Home
+Assistant may have missed it; the Supervisor lists the messages of started
+apps only, and deletes them when the app is uninstalled. Home Assistant Core
+then starts the config flow of the integration whose domain is the service,
+`housecairn`, with the message as `HassioServiceInfo`
+(`homeassistant/components/hassio/discovery.py`). Reading that message in the
+integration is the integration's change (HouseCairn/home-assistant-housecairn).
+
+**What it needs, and what it allows.** `discovery: [housecairn]` in
+`config.yaml`: the Supervisor refuses a service the app does not list (403,
+`set_discovery` in `supervisor/api/discovery.py`). **No `hassio_api` and no
+`hassio_role`**: `/discovery*` is in `api_bypass` of the Supervisor's
+security middleware (`supervisor/api/middleware/security.py`, main of
+November 2026, for `/v2` as well), checked before `hassio_api` and the role,
+and the developer documentation lists it among the calls an app may make
+"without needing to set `hassio_api: true`" (Communication). So D6 still
+holds: the app has no Supervisor API access beyond what every app has. What
+that path lets an app do: send or replace its own messages, for the services
+it lists, and delete its own (`del_discovery` refuses another app's).
+Listing and reading messages is for Home Assistant Core only
+(`require_home_assistant`). The security rating does not change (7, D6):
+`rating_security` does not count `discovery`.
+
+**The internal name is always accepted** (D10). Through ingress alone,
+`ALLOWED_HOSTS` is `*`. With the port published, the app's names on the
+internal network, `hostname` and the `dns` names of its information (such as
+`<hostname>.local.hass.io`), are added after `allowed_hosts`: Home Assistant
+must reach the address the app announces even when the option names only the
+addresses of the browsers. `allowed_hosts` is still required with the port
+published: the internal name is for software on the internal network, not
+for a browser on the port. Accepting the internal name opens nothing: the
+internal network already reaches the app, and could send any listed name
+(D10).
+
+**It never stops the start.** A refused or unanswered announcement (two
+attempts, five seconds each) is logged with the address to give the
+integration by hand, and HouseCairn starts. The log says, at each start,
+either `announced to Home Assistant at http://<hostname>:8000` or why not.
+
+Rejected:
+
+- **`hassio_api: true` with `hassio_role: default`**: not needed for
+  `/discovery`, which is in the Supervisor's `api_bypass` list, and it would
+  give the start script, and any code that got its token, every `/…/info`
+  endpoint of the Supervisor (`ROLE_DEFAULT`).
+- **The public address (`site_url`) or the ingress address in the message**:
+  the first may be absent or reach the app through a proxy the integration
+  does not need, the second only opens with an ingress session.
+- **The IP address of the app** (`ip_address` of its information): it can
+  change when the app restarts; the host name does not.
+- **Announcing from HouseCairn itself**: it would need the Supervisor's token
+  or socket in HouseCairn's environment, which D3 keeps out.

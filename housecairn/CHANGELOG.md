@@ -3,6 +3,20 @@
 All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from.
 
+## Unreleased
+
+- **The Housecairn integration finds the app by itself.** At each start, the
+  app announces its address on Home Assistant's internal network, such as
+  `http://a0d7b954-housecairn:8000`, and Home Assistant offers to set up the
+  integration without asking for an address, with a version of the
+  integration that reads the announcement. Only that internal address is
+  used, in plain HTTP on a network that never leaves the device; the port can
+  stay closed. The **Log** tab says whether the announcement went through,
+  and Housecairn starts either way. The app asks for no extra access for it.
+- **The internal name is always accepted**, also with the port open and
+  **Host names** restricted to the names of your browsers: nothing to add to
+  the option.
+
 ## 0.5.1
 
 Built from `ghcr.io/housecairn/housecairn:0.5.1`, a release of Housecairn. Read

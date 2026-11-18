@@ -42,6 +42,12 @@ ports:
 # and Docker's default AppArmor profile. /tmp in memory, as in HouseCairn's
 # compose.yaml.
 tmpfs: true
+# The service run.py announces to Home Assistant at start, with the app's
+# address on the Supervisor's internal network, for the Housecairn
+# integration (D15). Calling /discovery needs no `hassio_api`; the Supervisor
+# refuses a service that is not listed here.
+discovery:
+  - housecairn
 # Seconds to stop: HouseCairn gives its web server and task worker 20 s.
 timeout: 30
 # Stopped during a backup, so the SQLite database and its WAL file are copied
@@ -60,7 +66,8 @@ environment:
 # empty keeps HouseCairn's default and, where HouseCairn has the setting in
 # its interface, leaves it editable there. allowed_hosts is only used, and
 # then required, when the port is published on the host: through ingress
-# alone, every host name is accepted (D10).
+# alone, every host name is accepted (D10). The app's internal name is
+# always accepted (D15).
 #
 # trusted_origins is only needed behind a reverse proxy in front of Home
 # Assistant that changes the Host header or does not set X-Forwarded-Proto:
