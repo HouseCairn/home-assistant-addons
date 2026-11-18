@@ -13,9 +13,13 @@ Standard library only.
       ghcr.io/housecairn/housecairn:<version> (anonymous pull token), checked: the
       registry's digest is the SHA-256 of the index it sent, and the index holds
       linux/amd64 and linux/arm64. Prints the digest.
+  app_update.py consistent
+      Check that `version` in housecairn/config.yaml is the tag of the FROM line of
+      housecairn/Dockerfile, or that tag followed by a fourth number (D4).
   app_update.py apply <version> <digest> <release url>
       Change, together (D4), the tag and digest in housecairn/Dockerfile, `version`
-      in housecairn/config.yaml, and add the entry of the changelog that points to
+      in housecairn/config.yaml (back to the plain tag, whatever fourth number it
+      had), and add the entry of the changelog that points to
       the release notes. Entries already under "Unreleased" move under the new
       version.
 
@@ -69,6 +73,7 @@ FROM_LINE = re.compile(
     re.MULTILINE,
 )
 CONFIG_VERSION = re.compile(r'^version: "(?P<version>[^"]*)"$', re.MULTILINE)
+MODULE_VERSION = re.compile(r"^(?P<tag>\d+\.\d+\.\d+)(\.(?P<n>[1-9]\d*))?$")
 UNRELEASED = re.compile(r"^## Unreleased\n", re.MULTILINE)
 FIRST_ENTRY = re.compile(r"^## ", re.MULTILINE)
 
@@ -83,6 +88,26 @@ def parse_version(text: str) -> tuple[int, int, int]:
         raise UpdateError(f"{text!r} is not a version X.Y.Z")
     major, minor, patch = (int(part) for part in match.groups())
     return major, minor, patch
+
+
+def module_version_matches(module_version: str, tag: str) -> bool:
+    """D4: the app's version is the image tag, or the tag and a fourth number (1, 2...)."""
+    match = MODULE_VERSION.fullmatch(module_version)
+    return bool(match) and match.group("tag") == tag
+
+
+def consistent(dockerfile: Path = DOCKERFILE, config: Path = CONFIG) -> str:
+    """The version of config.yaml against the tag of the Dockerfile (D4); returns it."""
+    tag, _ = current(dockerfile)
+    found = CONFIG_VERSION.findall(config.read_text(encoding="utf-8"))
+    if len(found) != 1:
+        raise UpdateError(f'{config}: expected one line version: "X.Y.Z"')
+    if not module_version_matches(found[0], tag):
+        raise UpdateError(
+            f"version {found[0]!r} of {config.name} is neither the image tag {tag} "
+            f"nor {tag}.<n> (docs/decisions.md, D4)"
+        )
+    return found[0]
 
 
 def current(dockerfile: Path = DOCKERFILE) -> tuple[str, str]:
@@ -258,6 +283,7 @@ def apply(
     text = config.read_text(encoding="utf-8")
     if len(CONFIG_VERSION.findall(text)) != 1:
         raise UpdateError(f'{config}: expected one line version: "X.Y.Z"')
+    # The plain tag of the new image, whatever fourth number the app had (D4).
     config.write_text(CONFIG_VERSION.sub(f'version: "{version}"', text, count=1), encoding="utf-8")
 
     text = changelog.read_text(encoding="utf-8")
@@ -286,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     p_schedule = sub.add_parser("schedule")
     p_schedule.add_argument("repository")
     p_schedule.add_argument("--workflow-json", type=Path)
+    sub.add_parser("consistent")
     p_apply = sub.add_parser("apply")
     p_apply.add_argument("version")
     p_apply.add_argument("digest")
@@ -303,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             print(resolve(args.version))
         elif args.command == "verify":
             verify(args.version, args.digest)
+        elif args.command == "consistent":
+            print(f"version {consistent()} matches the image tag (D4)")
         elif args.command == "schedule":
             print(f"{SCHEDULED_WORKFLOW}: {schedule_state(args.repository, args.workflow_json)}")
         else:

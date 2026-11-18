@@ -92,16 +92,24 @@ The secret key is not an option: HouseCairn generates it once, on first start,
 in `/data/secret_key` (mode 600) when `SECRET_KEY` is unset, and the start
 script makes sure it is unset.
 
-## D4. Version: the tag of HouseCairn's image
+## D4. Version: the tag of HouseCairn's image, and a fourth number
 
 `version` in `config.yaml` is the tag of HouseCairn's image the Dockerfile is
-built from, so users see which HouseCairn they run. Since HouseCairn 0.1.0, the
+built from, so users see which HouseCairn they run. When only the app changes
+on the same image (a fix or a feature of `run.py`, `config.yaml`, the
+documentation), a fourth number follows the tag: `0.5.1.1`, then `0.5.1.2`. It
+returns to the plain tag with the next image: the update to HouseCairn 0.5.2
+sets `0.5.2`, not `0.5.2.1`. Otherwise a change of the app would wait for a
+release of the whole application. The checks accept `<tag>` or `<tag>.<n>`,
+where `<tag>` is the tag of the Dockerfile's `FROM`, and nothing else.
+Since HouseCairn 0.1.0, the
 app uses the `X.Y.Z` tag of a HouseCairn release; before it, HouseCairn
 published only `edge`, which moves, and `sha-<commit>` tags, and the app used a
 `sha-<commit>` tag. `latest` is never used: the Supervisor would not see an
 update, and users would not all run the same image. The base image is also
 pinned by digest in the Dockerfile; tag, digest, `version` and the changelog
-change in the same commit.
+change in the same commit (for a new image; a change of the app alone only
+moves the fourth number and the changelog).
 
 ## D5. Plain HTTP, through ingress and on the optional port
 

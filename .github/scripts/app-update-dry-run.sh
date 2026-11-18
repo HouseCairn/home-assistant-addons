@@ -7,7 +7,8 @@
 #    days without activity on a public repository), so that it does not stop in
 #    silence. Needs GITHUB_REPOSITORY, skipped without.
 # 1. The real app against the latest Housecairn release: prints whether it is
-#    up to date.
+#    up to date, and that its version is the image tag, or the tag and a fourth
+#    number (D4).
 # 2. A newer release, simulated: a copy of the repository moved back to
 #    Housecairn 0.3.0, then the same steps as the workflow (check, resolve the
 #    multi-architecture digest, verify its signed provenance, apply), and the
@@ -25,8 +26,9 @@ fi
 
 echo "=== The app against the latest release"
 python3 "$ROOT/.github/scripts/app_update.py" check
+python3 "$ROOT/.github/scripts/app_update.py" consistent
 
-echo "=== A newer release, simulated: the app moved back to $OLD_VERSION"
+echo "=== A newer release, simulated: the app moved back to $OLD_VERSION.1"
 SIM=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/app-update.XXXXXX")
 trap 'rm -rf "$SIM"' EXIT
 mkdir -p "$SIM/.github/scripts" "$SIM/housecairn"
@@ -34,7 +36,7 @@ cp "$ROOT/.github/scripts/app_update.py" "$SIM/.github/scripts/"
 cp "$ROOT/housecairn/Dockerfile" "$ROOT/housecairn/config.yaml" "$ROOT/housecairn/CHANGELOG.md" "$SIM/housecairn/"
 sed -i -E "s|^(FROM ghcr\.io/housecairn/housecairn:)[0-9.]+@sha256:[0-9a-f]{64}$|\1$OLD_VERSION@$OLD_DIGEST|" \
   "$SIM/housecairn/Dockerfile"
-sed -i -E "s|^version: \"[^\"]*\"$|version: \"$OLD_VERSION\"|" "$SIM/housecairn/config.yaml"
+sed -i -E "s|^version: \"[^\"]*\"$|version: \"$OLD_VERSION.1\"|" "$SIM/housecairn/config.yaml"
 # The changelog as it was then: its title, then the entries from $OLD_VERSION down.
 awk -v old="## $OLD_VERSION" '
   /^## / && !seen { skip = 1; seen = 1 }

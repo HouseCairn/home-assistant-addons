@@ -39,7 +39,7 @@ def release(tag: str, **extra: object) -> dict[str, object]:
 class Tree:
     """A copy of the app's three files, at version 0.3.1."""
 
-    def __init__(self, unreleased: bool = False) -> None:
+    def __init__(self, unreleased: bool = False, config_version: str = "0.3.1") -> None:
         self.dir = Path(tempfile.mkdtemp())
         for name in ("Dockerfile", "config.yaml", "CHANGELOG.md"):
             shutil.copy(REPO / "housecairn" / name, self.dir / name)
@@ -50,7 +50,7 @@ class Tree:
         )
         config = self.config.read_text(encoding="utf-8")
         self.config.write_text(
-            update.CONFIG_VERSION.sub('version: "0.3.1"', config), encoding="utf-8"
+            update.CONFIG_VERSION.sub(f'version: "{config_version}"', config), encoding="utf-8"
         )
         changelog = self.changelog.read_text(encoding="utf-8")
         changelog = update.UNRELEASED.sub("", changelog)
@@ -228,6 +228,72 @@ class ApplyTests(unittest.TestCase):
                 tree.apply(version, digest)
         for path, text in files.items():
             self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+
+class ModuleVersionTests(unittest.TestCase):
+    """D4: the app's version is the image tag, or the tag and a fourth number."""
+
+    def test_the_repository_is_consistent(self) -> None:
+        version = update.consistent()
+        tag, _ = update.current()
+        self.assertTrue(version == tag or version.startswith(f"{tag}."))
+
+    def test_accepted(self) -> None:
+        for version in ("0.5.1", "0.5.1.1", "0.5.1.2", "0.5.1.10"):
+            with self.subTest(version=version):
+                self.assertTrue(update.module_version_matches(version, "0.5.1"))
+
+    def test_refused(self) -> None:
+        for version in (
+            "0.5.2",  # another tag
+            "0.5.2.1",
+            "0.5",
+            "0.5.1.0",  # the plain tag has no ".0"
+            "0.5.1.01",
+            "0.5.1.1.1",
+            "0.5.10",  # a prefix of the tag is not the tag
+            "0.5.1.",
+            "0.5.1.x",
+            "v0.5.1",
+            "0.5.1.1 ",
+            "",
+        ):
+            with self.subTest(version=version):
+                self.assertFalse(update.module_version_matches(version, "0.5.1"))
+        self.assertFalse(update.module_version_matches("0.5.11", "0.5.1"))
+
+    def test_consistent_reads_both_files(self) -> None:
+        for config_version, ok in (("0.3.1", True), ("0.3.1.4", True), ("0.3.2", False), ("0.3.1.0", False), ("0.4.0.1", False)):
+            tree = Tree(config_version=config_version)
+            self.addCleanup(tree.cleanup)
+            with self.subTest(config_version=config_version):
+                if ok:
+                    self.assertEqual(update.consistent(tree.dockerfile, tree.config), config_version)
+                else:
+                    with self.assertRaises(update.UpdateError):
+                        update.consistent(tree.dockerfile, tree.config)
+
+    def test_the_next_image_resets_the_fourth_number(self) -> None:
+        tree = Tree(config_version="0.3.1.2")
+        self.addCleanup(tree.cleanup)
+        tree.apply("0.4.0")
+        self.assertEqual(update.CONFIG_VERSION.findall(tree.config.read_text(encoding="utf-8")), ["0.4.0"])
+        self.assertEqual(update.consistent(tree.dockerfile, tree.config), "0.4.0")
+
+    def test_a_release_not_newer_than_the_image_is_refused_whatever_the_fourth_number(self) -> None:
+        tree = Tree(config_version="0.3.1.2")
+        self.addCleanup(tree.cleanup)
+        before = tree.config.read_text(encoding="utf-8")
+        with self.assertRaises(update.UpdateError):
+            tree.apply("0.3.1")
+        self.assertEqual(tree.config.read_text(encoding="utf-8"), before)
+
+    def test_the_changelog_section_of_the_app_alone_stays_under_the_new_entry(self) -> None:
+        tree = Tree(config_version="0.3.1.1")
+        self.addCleanup(tree.cleanup)
+        tree.apply("0.4.0")
+        changelog = tree.changelog.read_text(encoding="utf-8")
+        self.assertLess(changelog.index("## 0.4.0"), changelog.index("## 0.3.1"))
 
 
 class ScheduleStateTests(unittest.TestCase):
