@@ -647,13 +647,17 @@ class OwnershipTests(unittest.TestCase):
 
 
 DRIVER = """
-import json, sys
+import json, os, sys
 from pathlib import Path
 import importlib.util
 spec = importlib.util.spec_from_file_location("run", sys.argv[1])
 run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run)
 data = Path(sys.argv[2])
+if os.environ.pop("DRIVER_ANNOUNCE_RAISES", ""):
+    def broken(*args, **kwargs):
+        raise RuntimeError("not a Supervisor error")
+    run.announce = broken
 run.DATA_DIR = data
 run.OPTIONS_FILE = data / "options.json"
 probe = "import json, os; print(json.dumps([os.getuid(), os.getgid(), os.getgroups(), sys.argv[1:], dict(os.environ)]))"
@@ -762,6 +766,26 @@ class MainTests(unittest.TestCase):
         self.assertIn("could not announce the app to Home Assistant (/discovery: HTTP 403)", out.stderr)
         self.assertIn(f"give it http://{HOSTNAME}:8000", out.stderr)
         self.assertEqual(os.stat(data).st_uid, run.APP_UID)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_an_unexpected_failure_to_announce_does_not_stop_the_start(self) -> None:
+        out, data = self.start(
+            HOSTS, network={"8000/tcp": 8000}, env={"DRIVER_ANNOUNCE_RAISES": "1"}
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)[4]["ALLOWED_HOSTS"], f"homeassistant.local,{HOSTNAME},{DNS[0]}")
+        self.assertIn("could not announce the app to Home Assistant (/discovery: RuntimeError)", out.stderr)
+        self.assertNotIn("not a Supervisor error", out.stderr)
+        self.assertEqual(os.stat(data).st_uid, run.APP_UID)
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
+    def test_only_the_run_command_announces(self) -> None:
+        for command in ("healthcheck", "manage"):
+            with self.subTest(command=command):
+                out, _ = self.start(HOSTS, network={"8000/tcp": 8000}, command=command)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertNotIn("announc", out.stderr)
+                self.assertEqual(self.server.messages, [])
 
     @unittest.skipUnless(os.geteuid() == 0, "needs root, as in the container")
     def test_published_port_without_allowed_hosts_stops_before_anything_changes(self) -> None:

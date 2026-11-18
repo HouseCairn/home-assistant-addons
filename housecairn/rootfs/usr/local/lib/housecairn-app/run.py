@@ -674,8 +674,6 @@ def announce_message(host: str | None, error: SupervisorError | None) -> str:
     )
 
 
-
-
 def fix_ownership(
     data_dir: Path,
     uid: int,

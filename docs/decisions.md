@@ -684,10 +684,10 @@ either `announced to Home Assistant at http://<hostname>:8000` or why not.
 
 Rejected:
 
-- **`hassio_api: true` with `hassio_role: default`**, which the first draft of
-  this change expected: not needed for `/discovery`, and it would give the
-  start script, and any code that got its token, every `/…/info` endpoint of
-  the Supervisor (`ROLE_DEFAULT`).
+- **`hassio_api: true` with `hassio_role: default`**: not needed for
+  `/discovery`, which is in the Supervisor's `api_bypass` list, and it would
+  give the start script, and any code that got its token, every `/…/info`
+  endpoint of the Supervisor (`ROLE_DEFAULT`).
 - **The public address (`site_url`) or the ingress address in the message**:
   the first may be absent or reach the app through a proxy the integration
   does not need, the second only opens with an ingress session.
