@@ -6,7 +6,7 @@ name: Housecairn
 # published on ghcr.io/housecairn/housecairn: `X.Y.Z`. When only the app
 # changes on the same image, a fourth number follows it: `X.Y.Z.1`, `X.Y.Z.2`,
 # back to the plain tag with the next image (D4).
-version: "0.5.1.1"
+version: "0.5.2"
 slug: housecairn
 description: >-
   Plan home maintenance and renovation work: what to do in the house, where,

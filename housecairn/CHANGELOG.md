@@ -4,6 +4,12 @@ All notable changes of the Housecairn app. The version of the app is the tag of
 the Housecairn image it is built from, followed by a fourth number when only the
 app changes on the same image.
 
+## 0.5.2
+
+Built from `ghcr.io/housecairn/housecairn:0.5.2`, a release of Housecairn. Read
+its [release notes](https://github.com/HouseCairn/housecairn/releases/tag/v0.5.2)
+before updating, and make a backup that includes the app, as for every update.
+
 ## 0.5.1.1
 
 The app announces its address to Home Assistant at each start, so the Housecairn
